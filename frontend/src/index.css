@@ -77,3 +77,158 @@ body {
 .fade-in {
   animation: fadeInUp 0.2s ease forwards;
 }
+
+/* ── assistant markdown rendering ── */
+.assistant-markdown {
+  width: 100%;
+  max-width: 68ch;
+  color: var(--text-primary);
+  font-size: 15px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.assistant-markdown > :first-child {
+  margin-top: 0;
+}
+
+.assistant-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.assistant-markdown p {
+  margin: 0 0 0.95rem;
+}
+
+.assistant-markdown h1,
+.assistant-markdown h2,
+.assistant-markdown h3,
+.assistant-markdown h4 {
+  color: #111827;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: -0.015em;
+  margin: 1.55rem 0 0.65rem;
+}
+
+.assistant-markdown h1 { font-size: 1.65rem; }
+.assistant-markdown h2 { font-size: 1.38rem; }
+.assistant-markdown h3 { font-size: 1.15rem; }
+.assistant-markdown h4 { font-size: 1rem; }
+
+.assistant-markdown ul,
+.assistant-markdown ol {
+  margin: 0 0 1rem 1.35rem;
+  padding-left: 1.1rem;
+}
+
+.assistant-markdown li {
+  margin: 0.35rem 0;
+  padding-left: 0.15rem;
+}
+
+.assistant-markdown li > p {
+  margin: 0.25rem 0;
+}
+
+.assistant-markdown li > ul,
+.assistant-markdown li > ol {
+  margin-top: 0.35rem;
+  margin-bottom: 0.35rem;
+}
+
+.assistant-markdown blockquote {
+  margin: 1rem 0;
+  padding: 0.2rem 0 0.2rem 1rem;
+  border-left: 3px solid var(--border);
+  color: var(--text-secondary);
+}
+
+.assistant-markdown pre {
+  margin: 1rem 0;
+  padding: 1rem;
+  overflow-x: auto;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  background: #0f172a;
+  color: #e5e7eb;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre;
+}
+
+.assistant-markdown pre code {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.assistant-inline-code {
+  padding: 0.15rem 0.35rem;
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  background: #f3f4f6;
+  color: #111827;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.9em;
+  white-space: break-spaces;
+}
+
+.assistant-markdown a {
+  color: var(--accent-blue-dark);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.assistant-markdown table {
+  width: 100%;
+  margin: 1rem 0;
+  border-collapse: collapse;
+  font-size: 0.95em;
+  display: block;
+  overflow-x: auto;
+}
+
+.assistant-markdown th,
+.assistant-markdown td {
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.assistant-markdown th {
+  background: #f8fafc;
+  font-weight: 650;
+}
+
+.assistant-markdown hr {
+  margin: 1.4rem 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+.assistant-markdown .katex {
+  font-size: 1.04em;
+}
+
+.assistant-markdown .katex-display {
+  margin: 1.1rem 0 1.2rem;
+  padding: 0.85rem 1rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  background: #fbfbfa;
+  line-height: 1.4;
+}
+
+.assistant-markdown .katex-display > .katex {
+  display: inline-block;
+  min-width: max-content;
+  text-align: left;
+}

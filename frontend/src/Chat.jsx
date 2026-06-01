@@ -7,6 +7,52 @@ import UploadButton from './UploadButton'
 
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkBreaks from 'remark-breaks'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
+
+
+function normalizeMathDelimiters(content) {
+  return content
+    .split(/(```[\s\S]*?```|`[^`\n]*`)/g)
+    .map(segment => {
+      if (segment.startsWith('`')) return segment
+      return segment
+        .replace(/\\\[/g, '$$')
+        .replace(/\\\]/g, '$$')
+        .replace(/\\\(/g, '$')
+        .replace(/\\\)/g, '$')
+    })
+    .join('')
+}
+
+function AssistantMarkdown({ content }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm, remarkMath, remarkBreaks]}
+      rehypePlugins={[rehypeKatex]}
+      components={{
+        a: ({ children, ...props }) => (
+          <a {...props} target="_blank" rel="noreferrer">{children}</a>
+        ),
+        code: ({ children, className, ...props }) => {
+          const codeText = String(children)
+          const isInline = !className && !codeText.includes('\n')
+          return (
+            <code
+              {...props}
+              className={isInline ? 'assistant-inline-code' : className}
+            >
+              {children}
+            </code>
+          )
+        },
+      }}
+    >
+      {normalizeMathDelimiters(content)}
+    </ReactMarkdown>
+  )
+}
 
 const SUGGESTIONS = [
   'Generate POSCAR for NaCl',
@@ -44,7 +90,6 @@ export default function Chat({
   const [input,     setInput]     = useState('')
   const [streaming, setStreaming] = useState(false)
   const [error,     setError]     = useState(null)
-  const [needsApiKey,    setNeedsApiKey]    = useState(null)
   const [pendingMessage, setPendingMessage] = useState(null)
 
   const bottomRef   = useRef(null)
@@ -65,7 +110,6 @@ export default function Chat({
     })
     setInput('')
     setError(null)
-    setNeedsApiKey(null)
   }, [sessionId, initialMessages])
 
   useEffect(() => {
@@ -258,8 +302,7 @@ export default function Chat({
     abortControllerRef.current?.abort()
   }
 
-  async function handleKeySaved(service, keyValue) {
-    setNeedsApiKey(null)
+  async function handleKeySaved() {
     if (!pendingMessage) return
     const retry = pendingMessage
     setPendingMessage(null)
@@ -447,26 +490,8 @@ export default function Chat({
 
                       {/* ── assistant text (markdown) ── */}
                       {msg.content && (
-                        <div style={{
-                          fontSize: '15px', lineHeight: '1.8',
-                          color: 'var(--text-primary)', wordBreak: 'break-word',
-                        }}>
-                          <ReactMarkdown
-                            remarkPlugins={[remarkGfm]}
-                            components={{
-                              h1: ({ children }) => <h1 style={{ fontSize: '26px', fontWeight: '700', color: '#111827', margin: '26px 0 14px', lineHeight: '1.3' }}>{children}</h1>,
-                              h2: ({ children }) => <h2 style={{ fontSize: '22px', fontWeight: '700', color: '#111827', margin: '22px 0 12px', lineHeight: '1.35' }}>{children}</h2>,
-                              h3: ({ children }) => <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', margin: '18px 0 10px', lineHeight: '1.4' }}>{children}</h3>,
-                              p:  ({ children }) => <p  style={{ marginBottom: '14px', lineHeight: '1.8', color: 'var(--text-primary)' }}>{children}</p>,
-                              strong: ({ children }) => <strong style={{ fontWeight: '700', color: '#111827' }}>{children}</strong>,
-                              ul: ({ children }) => <ul style={{ paddingLeft: '22px', marginBottom: '16px' }}>{children}</ul>,
-                              ol: ({ children }) => <ol style={{ paddingLeft: '22px', marginBottom: '16px' }}>{children}</ol>,
-                              li: ({ children }) => <li style={{ marginBottom: '8px', lineHeight: '1.75' }}>{children}</li>,
-                              code: ({ children }) => <code style={{ background: '#f3f4f6', padding: '2px 5px', borderRadius: '4px', fontSize: '13px', color: '#111827' }}>{children}</code>,
-                            }}
-                          >
-                            {msg.content}
-                          </ReactMarkdown>
+                        <div className="assistant-markdown">
+                          <AssistantMarkdown content={msg.content} />
 
                           {/* streaming cursor — only when no tools running */}
                           {isLive && !msg.activeToolName && msg.toolCards.length === 0 && (
