@@ -30,7 +30,7 @@ from typing import Optional
 _DEFAULT_MODELS_ROOT = Path(
     os.environ.get(
         "PRE_TRAINED_MODELS_DIR",
-        Path(__file__).resolve().parents[3] / "pre_trained_models",
+        Path(__file__).resolve().parents[4] / "pre_trained_models",
     )
 )
 

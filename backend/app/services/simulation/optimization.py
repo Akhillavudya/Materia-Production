@@ -43,8 +43,9 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from app.services.calculator_factory import get_calculator
-from app.services.incar_kpoints_service import generate_incar, generate_kpoints
+from app.services.simulation.calculator_factory import get_calculator
+from app.services.vasp.incar import generate_incar
+from app.services.vasp.kpoints import generate_kpoints
 
 
 # ── Public API ────────────────────────────────────────────────────────────────

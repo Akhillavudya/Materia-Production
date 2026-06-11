@@ -12,7 +12,7 @@ from app.database.db import get_db
 from app.database.models import User
 from app.repositories import session_repository
 from app.schemas.upload import UploadedFileOut
-from app.services.file_service import (
+from app.services.storage.file_service import (
     STORAGE_ROOT,
     get_upload_dir,
     is_upload_allowed,

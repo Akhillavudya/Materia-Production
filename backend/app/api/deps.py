@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models import Session, User
 from app.repositories import session_repository
-from app.services.file_service import STORAGE_ROOT
+from app.services.storage.file_service import STORAGE_ROOT
 
 
 async def get_session_for_user(

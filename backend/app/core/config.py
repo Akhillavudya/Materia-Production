@@ -39,6 +39,17 @@ class Settings(BaseModel):
     # ── Database ─────────────────────────────────────────────────────────────
     db_path: str = "materia.db"
 
+    # ── Storage / compute ────────────────────────────────────────────────────
+    # Optional overrides; storage defaults to app/storage/runs (file_service).
+    storage_root: str | None = None
+    # NCORE for generated INCARs. Left unset (None) → omitted so VASP auto-parallelises
+    # rather than hardcoding a value that mis-parallelises on other machines (§9).
+    vasp_ncore: int | None = None
+    # Licensed VASP PAW potential directory (POT_GGA_PAW_PBE/...). When set, a real
+    # POTCAR is assembled and authoritative ENMAX is read from it; otherwise only a
+    # POTCAR.spec (labels + recommended ENMAX) is emitted. POTCARs are never shipped.
+    pmg_vasp_psp_dir: str | None = None
+
     # ── LLM provider ─────────────────────────────────────────────────────────
     model_provider: str | None = None
     ollama_base_url: str = "http://localhost:11434"
@@ -61,6 +72,9 @@ def get_settings() -> Settings:
             os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000")
         ),
         db_path=os.getenv("DB_PATH", "materia.db"),
+        storage_root=os.getenv("STORAGE_ROOT"),
+        vasp_ncore=(int(os.environ["VASP_NCORE"]) if os.getenv("VASP_NCORE") else None),
+        pmg_vasp_psp_dir=os.getenv("PMG_VASP_PSP_DIR"),
         model_provider=os.getenv("MODEL_PROVIDER"),
         ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
         ollama_model=os.getenv("OLLAMA_MODEL", "qwen3:14b"),

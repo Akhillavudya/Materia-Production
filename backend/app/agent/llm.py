@@ -25,11 +25,10 @@ CRITICAL RULES:
 - Be concise and scientifically accurate
 
 AVAILABLE TOOLS:
-1. search_material({"formula": "NaCl", "limit": 10})
-2. generate_poscar({"material_id": "mp-123", "source": "mp", "name": "NaCl"})
-3. list_files({})
-4. read_file({"name": "auto"})
-5. rename_file({"name": "old.txt", "new_name": "new.txt"})
+1. search_materials({"formula": "NaCl", "limit": 10})
+2. generate_vasp_inputs({"material_id": "mp-123", "source": "mp", "task": "relaxation"})
+3. optimize_structure({"fmax": 0.02, "calculator_type": "mace"})
+4. run_md_simulation({"ensemble": "nvt", "temperature": 300})
 """
 
 

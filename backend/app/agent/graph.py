@@ -31,10 +31,11 @@ from app.agent.llm import stream_chat          # used only for conversational an
 from app.agent.tool_registry import CALLABLE_TOOL_MAP, TOOL_MAP
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.services.file_service import (
+from app.services.storage.file_service import (
     get_session_dir,
     list_new_files,
     find_best_poscar,
+    _session_dir_var,
 )
 
 logger = get_logger(__name__)
@@ -108,33 +109,12 @@ class AgentState(TypedDict):
 # POSCAR helpers (unchanged from your original)
 # ─────────────────────────────────────────────────────────────────────────────
 
-POSCAR_ARG_KEYS = [
-    "poscar_path", "initial_poscar_path", "final_poscar_path",
-    "lower_poscar_path", "upper_poscar_path",
-    "film_poscar_path",  "substrate_poscar_path",
-]
-
-POSCAR_REQUIRED_TOOLS = {
-    "generate_vasp_poscar_with_vacancy_defects",
-    "generate_vasp_poscar_with_substitution_defects",
-    "generate_vasp_poscar_with_interstitial_defects",
-    "generate_supercell_from_poscar",
-    "generate_sqs_from_poscar",
-    "generate_surface_slab_from_poscar",
-    "customize_vasp_kpoints_with_accuracy",
-    "generate_vasp_inputs_from_poscar",
-    "generate_vasp_workflow_of_eos",
-    "generate_vasp_workflow_of_elastic_constants",
-    "generate_vasp_workflow_of_aimd",
-    "generate_vasp_workflow_of_convergence_tests",
-    "visualize_structure_from_poscar",
-    "run_simulation_using_mlps",
-}
+POSCAR_ARG_KEYS = ["poscar_path", "poscar_name"]
 
 
 def resolve_args(tool_name: str, tool_args: dict, session_dir: str) -> dict:
+    """Resolve 'auto'/missing structure-file args to the best POSCAR in session."""
     resolved = dict(tool_args)
-    
 
     for key in POSCAR_ARG_KEYS:
         if key not in resolved:
@@ -145,11 +125,6 @@ def resolve_args(tool_name: str, tool_args: dict, session_dir: str) -> dict:
             if best:
                 resolved[key] = best
                 logger.info(f"[Agent] Resolved {key} → {best}")
-    if tool_name in POSCAR_REQUIRED_TOOLS and "poscar_path" not in resolved:
-        best = find_best_poscar(session_dir)
-        if best:
-            resolved["poscar_path"] = best
-            logger.info(f"[Agent] Auto-added poscar_path → {best}")
     return resolved
 
 
@@ -159,7 +134,7 @@ async def q_put(queue: asyncio.Queue, event: str):
 
 def pick_material_from_results(step_results: list[dict]) -> dict | None:
     for result in reversed(step_results):
-        if result.get("tool") != "search_material":
+        if result.get("tool") != "search_materials":
             continue
         for material in result.get("materials", []):
             if material.get("has_structure", True):
@@ -167,7 +142,8 @@ def pick_material_from_results(step_results: list[dict]) -> dict | None:
     return None
 
 
-def auto_fill_generate_poscar_args(tool_args: dict, step_results: list[dict]) -> dict:
+def auto_fill_material_args(tool_args: dict, step_results: list[dict]) -> dict:
+    """Fill material_id/source for generate_vasp_inputs from a prior search."""
     resolved = dict(tool_args)
 
     needs_id = resolved.get("material_id") in (None, "", "auto")
@@ -177,7 +153,6 @@ def auto_fill_generate_poscar_args(tool_args: dict, step_results: list[dict]) ->
         return resolved
 
     material = pick_material_from_results(step_results)
-
     if not material:
         return resolved
 
@@ -185,8 +160,6 @@ def auto_fill_generate_poscar_args(tool_args: dict, step_results: list[dict]) ->
         resolved["material_id"] = material.get("id")
     if needs_source:
         resolved["source"] = material.get("source")
-    if not resolved.get("name"):
-        resolved["name"] = material.get("formula")
 
     return resolved
 
@@ -230,8 +203,8 @@ OUTPUT RULES:
 
 WHEN TO USE TOOLS:
 - Search/find materials in databases.
-- Generate/create/download/save a POSCAR.
-- Read, list, or rename files in the current session.
+- Generate VASP inputs (POSCAR + INCAR + KPOINTS) for a material or structure.
+- Optimize (relax) a structure, or run a molecular-dynamics simulation.
 
 WHEN NOT TO USE TOOLS:
 - General concept questions, explanations, greetings, or small talk.
@@ -241,19 +214,18 @@ AVAILABLE TOOLS:
 {TOOL_LIST_STR}
 
 PLANNING RULES:
-- For "find/search materials", use search_material only.
-- For "generate/create/save POSCAR for <formula>", use TWO steps:
-  1. search_material with the formula/element filters and show_summary false
-  2. generate_poscar with {{"material_id": "auto", "source": "auto", "name": "<formula>"}} and show_summary true
-- For "generate POSCAR for mp-123 / c2db:42 / oqmd:12345", use generate_poscar directly and infer source if obvious.
-- read_file takes {{"name": "filename"}} or {{"name": "auto"}}.
-- list_files takes {{}}.
+- For "find/search materials", use search_materials only.
+- For "generate VASP inputs / POSCAR for <formula>", use TWO steps:
+  1. search_materials with the formula/element filters and show_summary false
+  2. generate_vasp_inputs with {{"material_id": "auto", "source": "auto", "task": "relaxation"}} and show_summary true
+- For "generate inputs for mp-123 / c2db-42 / oqmd-12345", call generate_vasp_inputs directly with that material_id (and source if known).
+- For "optimize/relax it", use optimize_structure (auto-detects the session POSCAR).
+- For "run MD / molecular dynamics", use run_md_simulation.
 
 EXAMPLES:
-User: "Search MoS2" -> [{{"tool": "search_material", "args": {{"formula": "MoS2", "limit": 10}}, "reason": "Search databases for MoS2", "show_summary": true}}]
-User: "Generate POSCAR for NaCl" -> [{{"tool": "search_material", "args": {{"formula": "NaCl", "limit": 5}}, "reason": "Find a NaCl structure", "show_summary": false}}, {{"tool": "generate_poscar", "args": {{"material_id": "auto", "source": "auto", "name": "NaCl"}}, "reason": "Generate a POSCAR from the best matching structure", "show_summary": true}}]
-User: "What is in eos_cal.csv?" -> [{{"tool": "read_file", "args": {{"name": "eos_cal.csv"}}, "reason": "Read the requested file", "show_summary": false}}]
-User: "List my files" -> [{{"tool": "list_files", "args": {{}}, "reason": "List session files", "show_summary": false}}]
+User: "Search MoS2" -> [{{"tool": "search_materials", "args": {{"formula": "MoS2", "limit": 10}}, "reason": "Search databases for MoS2", "show_summary": true}}]
+User: "Generate VASP relaxation inputs for NaCl" -> [{{"tool": "search_materials", "args": {{"formula": "NaCl", "limit": 5}}, "reason": "Find a NaCl structure", "show_summary": false}}, {{"tool": "generate_vasp_inputs", "args": {{"material_id": "auto", "source": "auto", "task": "relaxation"}}, "reason": "Generate VASP inputs from the best matching structure", "show_summary": true}}]
+User: "Relax it with MACE" -> [{{"tool": "optimize_structure", "args": {{"fmax": 0.02, "calculator_type": "mace"}}, "reason": "Optimize the session structure", "show_summary": true}}]
 User: "What is DFT?" -> []
 """
 
@@ -345,86 +317,21 @@ async def tool_executor_node(state: AgentState) -> dict:
         await q_put(queue, f"data: {json.dumps({'type': 'token', 'value': err})}\n\n")
         return {"error": err, "_last_result": None}
 
-    # ── POSCAR guard (skip for non-structure tools) ───────────────────────────
-    NEEDS_POSCAR = {
-        "generate_vasp_poscar_with_vacancy_defects",
-        "generate_vasp_poscar_with_substitution_defects",
-        "generate_vasp_poscar_with_interstitial_defects",
-        "generate_supercell_from_poscar",
-        "generate_sqs_from_poscar",
-        "generate_surface_slab_from_poscar",
-        "customize_vasp_kpoints_with_accuracy",
-        "generate_vasp_inputs_from_poscar",
-        "generate_vasp_workflow_of_eos",
-        "generate_vasp_workflow_of_elastic_constants",
-        "generate_vasp_workflow_of_aimd",
-        "generate_vasp_workflow_of_convergence_tests",
-        "visualize_structure_from_poscar",
-        "run_simulation_using_mlps",
-    }
-    if tool_name in NEEDS_POSCAR and not find_best_poscar(session_dir):
-        err = f"⚠ No POSCAR found — cannot run {tool_name}"
-        await q_put(queue, f"data: [TOOL_END:{tool_name}:error]\n\n")
-        await q_put(queue, f"data: {json.dumps({'type': 'token', 'value': err})}\n\n")
-        return {"error": err, "_last_result": None}
+    # ── announce + spinner ─────────────────────────────────────────────────────
+    show_summary = step.get("show_summary", True)
 
-    # ── NEB guard ─────────────────────────────────────────────────────────────
-    if tool_name == "generate_vasp_workflow_of_neb":
-        if not tool_args.get("initial_poscar_path") or not tool_args.get("final_poscar_path"):
-            err = "⚠ NEB requires both initial_poscar_path and final_poscar_path."
-            await q_put(queue, f"data: [TOOL_END:{tool_name}:error]\n\n")
-            await q_put(queue, f"data: {json.dumps({'type': 'token', 'value': err})}\n\n")
-            return {"error": err, "_last_result": None}
-
-    # ── API-key guard ──────────────────────────────────────────────────────
-    mp_api_key = os.environ.get("MP_API_KEY")
-    if tool_name == "generate_vasp_poscar" and not mp_api_key:
-
-    
-
-        msg = (
-            "Materials Project API key is required before I can generate "
-            "POSCAR files. Please save your Materials Project API key below, "
-            "then I will retry this request."
-        )
-        await q_put(queue, f"data: {json.dumps({'type': 'token', 'value': msg})}\n\n")
-        await q_put(queue, "data: [NEED_API_KEY:mp]\n\n")
-        return {
-            "error": msg,
-            "plan": [step],
-            "_last_result": {
-                "tool": tool_name,
-                "label": tool_meta["label"],
-                "status": "needs_api_key",
-                "msg": msg,
-                "files": [],
-                "show_summary": False,
-            },
-        }
-
-    # ── show spinner for simulation tools, silent for utility tools ──────────
-    show_summary  = step.get("show_summary", True)
-    is_utility    = tool_name in ("list_files", "read_file", "rename_file")
-
-    if not is_utility:
-        step_reason = step.get("reason", tool_meta["label"])
-        intro_token = f"I'll {step_reason.lower().rstrip('.')}.\n"
-        await q_put(queue, f"data: {json.dumps({'type': 'token', 'value': intro_token})}\n\n")
+    step_reason = step.get("reason", tool_meta["label"])
+    intro_token = f"I'll {step_reason.lower().rstrip('.')}.\n"
+    await q_put(queue, f"data: {json.dumps({'type': 'token', 'value': intro_token})}\n\n")
 
     await q_put(queue, f"data: [TOOL_START:{tool_name}]\n\n")
-    if not is_utility:
-        label = tool_meta["label"]
-        await q_put(queue, f"data: {json.dumps({'type': 'status', 'value': f'⚙ {label}…'})}\n\n")
+    label = tool_meta["label"]
+    await q_put(queue, f"data: {json.dumps({'type': 'status', 'value': f'⚙ {label}…'})}\n\n")
 
     try:
         tool_args = resolve_args(tool_name, tool_args, session_dir)
-        if tool_name == "generate_poscar":
-            tool_args = auto_fill_generate_poscar_args(tool_args, state["step_results"])
-            if tool_args.get("material_id") in (None, "", "auto") or tool_args.get("source") in (None, "", "auto"):
-                raise ValueError("No material was selected for POSCAR generation. Search for a material first.")
-
-        if tool_name == "generate_vasp_poscar" and mp_api_key:
-            tool_args["mp_api_key"] = mp_api_key
+        if tool_name == "generate_vasp_inputs":
+            tool_args = auto_fill_material_args(tool_args, state["step_results"])
 
         t_before = time.time()
 
@@ -437,7 +344,6 @@ async def tool_executor_node(state: AgentState) -> dict:
         def _run_tool():
             # Set session dir inside the thread — ContextVar propagation
             # from async→thread is unreliable; explicit set is guaranteed.
-            from app.tools.utils import _session_dir_var
             _session_dir_var.set(_sdir)
             return tool_fn(**tool_args)
 
@@ -448,42 +354,7 @@ async def tool_executor_node(state: AgentState) -> dict:
         msg       = result.get("message", "")        if isinstance(result, dict) else str(result)
         new_files = list_new_files(session_id, t_before)
 
-        # ── for read_file: pass file content/metadata to the answer step ───────
-        if tool_name == "read_file":
-            content = result.get("content", "") if isinstance(result, dict) else str(result)
-            if not content and status != "success":
-                content = msg or "The requested file could not be read."
-            await q_put(queue, f"data: [TOOL_END:{tool_name}:{status}]\n\n")
-            tool_result_obj = {
-                "tool":         tool_name,
-                "label":        tool_meta["label"],
-                "status":       status,
-                "msg":          msg,
-                "files":        [],
-                "file_name":    result.get("name") if isinstance(result, dict) else None,
-                "rel_path":     result.get("rel_path") if isinstance(result, dict) else None,
-                "file_content": content,
-                "truncated":    result.get("truncated", False) if isinstance(result, dict) else False,
-                "show_summary": False,
-            }
-            return {"error": None, "_last_result": tool_result_obj}
-
-        # ── for list_files: just pass file list as context ────────────────────
-        if tool_name == "list_files":
-            files_list = result.get("files", []) if isinstance(result, dict) else []
-            await q_put(queue, f"data: [TOOL_END:{tool_name}:{status}]\n\n")
-            tool_result_obj = {
-                "tool":         tool_name,
-                "label":        tool_meta["label"],
-                "status":       status,
-                "msg":          msg,
-                "files":        [],
-                "files_list":   files_list,   # pass to result_injector for context
-                "show_summary": False,
-            }
-            return {"error": None, "_last_result": tool_result_obj}
-
-        # ── standard material/simulation tool ─────────────────────────────────
+        # ── material / simulation tool result ─────────────────────────────────
         tool_result_obj = {
             "tool":         tool_name,
             "label":        tool_meta["label"],
@@ -501,11 +372,10 @@ async def tool_executor_node(state: AgentState) -> dict:
                 "returned",
                 "formula",
                 "n_sites",
-                "lattice_a",
-                "lattice_b",
-                "lattice_c",
-                "poscar_path",
-                "named_path",
+                "task",
+                "encut",
+                "kmesh",
+                "elements",
                 "files_written",
                 "source",
                 "material_id",
@@ -628,7 +498,7 @@ Do not invent file values. Do not call tools. Keep the answer concise but includ
     else:
         material_searches = [
             r for r in step_results
-            if r.get("tool") == "search_material" and r.get("show_summary", True)
+            if r.get("tool") == "search_materials" and r.get("show_summary", True)
         ]
         if material_searches:
             lines: list[str] = []
@@ -645,12 +515,12 @@ Do not invent file values. Do not call tools. Keep the answer concise but includ
                                 id=m.get("id", ""),
                                 formula=m.get("formula", ""),
                                 source=m.get("source", ""),
-                                gap=fmt_material_value(m.get("gap_pbe")),
-                                form=fmt_material_value(m.get("formation_energy")),
+                                gap=fmt_material_value(m.get("band_gap_eV")),
+                                form=fmt_material_value(m.get("formation_energy_eV_per_atom")),
                             )
                         )
                     lines.append("")
-                    lines.append("Use one of these IDs if you want me to generate a POSCAR for a specific result.")
+                    lines.append("Use one of these IDs if you want me to generate VASP inputs for a specific result.")
                 elif r.get("status") != "success":
                     lines.append(r.get("msg") or "No matching materials were found.")
 
@@ -662,13 +532,13 @@ Do not invent file values. Do not call tools. Keep the answer concise but includ
 
         # simulation tools — show completion summary
         show_any = any(
-            r.get("show_summary", True) and r.get("tool") != "search_material"
+            r.get("show_summary", True) and r.get("tool") != "search_materials"
             for r in step_results
         )
         if show_any and step_results:
             lines = ["**Workflow completed.**\n"]
             for r in step_results:
-                if not r.get("show_summary", True) or r.get("tool") == "search_material":
+                if not r.get("show_summary", True) or r.get("tool") == "search_materials":
                     continue
                 icon   = "✅" if r["status"] == "success" else "⚠"
                 label  = r.get("label", r["tool"])
