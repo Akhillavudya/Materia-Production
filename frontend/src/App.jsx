@@ -1,15 +1,49 @@
-import { useState } from 'react'
-import Sidebar    from './Sidebar'
-import Chat       from './Chat'
-import RightPanel from './RightPanel'
-import { fetchMessages } from './api'
+import { useEffect, useState } from 'react'
+import Sidebar from './features/sessions/Sidebar'
+import Chat from './features/chat/Chat'
+import RightPanel from './features/sessions/RightPanel'
+import AuthScreen from './features/auth/AuthScreen'
+import { fetchMessages, getAuthToken, getMe, getStoredUser, logout } from './api'
 
 export default function App() {
   const [activeSessionId, setActiveSessionId] = useState(null)
-  const [loadedMessages,  setLoadedMessages]  = useState([])
+  const [loadedMessages, setLoadedMessages] = useState([])
   const [filePanelRefresh, setFilePanelRefresh] = useState(0)
-  const [jobRefresh,       setJobRefresh]       = useState(0)
-  const [rerunMessage,     setRerunMessage]     = useState(null)
+  const [jobRefresh, setJobRefresh] = useState(0)
+  const [rerunMessage, setRerunMessage] = useState(null)
+  const [user, setUser] = useState(() => getStoredUser())
+  const [authChecked, setAuthChecked] = useState(() => !getAuthToken())
+  const [authMessage, setAuthMessage] = useState(null)
+
+  useEffect(() => {
+    if (!getAuthToken()) return
+
+    getMe()
+      .then(nextUser => {
+        setUser(nextUser)
+        setAuthMessage(null)
+      })
+      .catch(() => {
+        logout()
+        setUser(null)
+        setAuthMessage('Session expired. Please log in again.')
+      })
+      .finally(() => setAuthChecked(true))
+  }, [])
+
+
+  useEffect(() => {
+    function handleAuthExpired(event) {
+      logout()
+      setUser(null)
+      setAuthChecked(true)
+      setAuthMessage(event.detail?.message || 'Session expired. Please log in again.')
+      handleNewChat()
+    }
+
+    window.addEventListener('materia-auth-expired', handleAuthExpired)
+    return () => window.removeEventListener('materia-auth-expired', handleAuthExpired)
+  }, [])
 
   async function handleSelectSession(id) {
     if (id === activeSessionId) return
@@ -32,11 +66,45 @@ export default function App() {
     setRerunMessage(null)
   }
 
-  function handleSessionCreated(id) { setActiveSessionId(id) }
-  function handleFilesGenerated()   { setFilePanelRefresh(p => p + 1) }
-  function handleJobDone()          { setJobRefresh(p => p + 1) }
-  function handleRerun(msg)         { setRerunMessage(msg) }
-  function handleRerunConsumed()    { setRerunMessage(null) }
+  function handleSessionCreated(id) {
+    setActiveSessionId(id)
+  }
+
+  function handleFilesGenerated() {
+    setFilePanelRefresh(p => p + 1)
+  }
+
+  function handleJobDone() {
+    setJobRefresh(p => p + 1)
+  }
+
+  function handleRerun(msg) {
+    setRerunMessage(msg)
+  }
+
+  function handleRerunConsumed() {
+    setRerunMessage(null)
+  }
+
+  function handleAuthenticated(nextUser) {
+    setUser(nextUser)
+    setAuthMessage(null)
+  }
+
+  function handleSignOut() {
+    logout()
+    setUser(null)
+    setAuthMessage(null)
+    handleNewChat()
+  }
+
+  if (!authChecked) {
+    return null
+  }
+
+  if (!user) {
+    return <AuthScreen onAuthenticated={handleAuthenticated} initialError={authMessage} />
+  }
 
   return (
     <div style={{
@@ -49,6 +117,8 @@ export default function App() {
         activeSessionId={activeSessionId}
         onSelectSession={handleSelectSession}
         onNewChat={handleNewChat}
+        user={user}
+        onSignOut={handleSignOut}
       />
 
       <Chat
@@ -71,125 +141,3 @@ export default function App() {
   )
 }
 
-// import { useState } from 'react'
-// import Sidebar   from './Sidebar'
-// import Chat      from './Chat'
-// import FilePanel from './FilePanel'
-// import { fetchMessages } from './api'
-
-// export default function App() {
-//   const [activeSessionId,   setActiveSessionId]   = useState(null)
-//   const [loadedMessages,    setLoadedMessages]    = useState([])
-
-//   // increment this after every tool call → FilePanel auto-reloads
-//   const [filePanelRefresh,  setFilePanelRefresh]  = useState(0)
-
-//   async function handleSelectSession(id) {
-//     if (id === activeSessionId) return
-//     setActiveSessionId(id)
-//     setFilePanelRefresh(0)   // reset refresh counter for new session
-//     try {
-//       const msgs = await fetchMessages(id)
-//       setLoadedMessages(msgs)
-//     } catch {
-//       setLoadedMessages([])
-//     }
-//   }
-
-//   function handleNewChat() {
-//     setActiveSessionId(null)
-//     setLoadedMessages([])
-//     setFilePanelRefresh(0)
-//   }
-
-//   function handleSessionCreated(id) {
-//     setActiveSessionId(id)
-//   }
-
-//   // called by Chat whenever a [FILES:...] event arrives
-//   function handleFilesGenerated() {
-//     setFilePanelRefresh(prev => prev + 1)
-//   }
-
-//   return (
-//     <div style={{
-//       display: 'flex',
-//       height: '100vh',
-//       background: '#0f1117',
-//       overflow: 'hidden',
-//     }}>
-//       <Sidebar
-//         activeSessionId={activeSessionId}
-//         onSelectSession={handleSelectSession}
-//         onNewChat={handleNewChat}
-//       />
-
-//       <Chat
-//         key={activeSessionId}
-//         sessionId={activeSessionId}
-//         initialMessages={loadedMessages}
-//         onSessionCreated={handleSessionCreated}
-//         onFilesGenerated={handleFilesGenerated}   
-//       />
-
-//       <FilePanel
-//         sessionId={activeSessionId}
-//         refreshTrigger={filePanelRefresh}
-//       />
-//     </div>
-//   )
-// }
-
-// // import { useState } from 'react'
-// // import Sidebar from './Sidebar'
-// // import Chat    from './Chat'
-// // import { fetchMessages } from './api'
-
-// // export default function App() {
-// //   const [activeSessionId, setActiveSessionId] = useState(null)
-// //   const [loadedMessages,  setLoadedMessages]  = useState([])
-
-// //   async function handleSelectSession(id) {
-// //     if (id === activeSessionId) return
-// //     setActiveSessionId(id)
-// //     try {
-// //       const msgs = await fetchMessages(id)
-// //       setLoadedMessages(msgs)
-// //     } catch {
-// //       setLoadedMessages([])
-// //     }
-// //   }
-
-// //   function handleNewChat() {
-// //     setActiveSessionId(null)
-// //     setLoadedMessages([])
-// //   }
-
-// //   function handleSessionCreated(id) {
-// //     setActiveSessionId(id)
-// //     // Chat already has the messages locally — no need to reload
-// //   }
-
-// //   return (
-// //     <div style={{ display: 'flex', height: '100vh', background: '#0f1117', overflow: 'hidden' }}>
-// //       <Sidebar
-// //         activeSessionId={activeSessionId}
-// //         onSelectSession={handleSelectSession}
-// //         onNewChat={handleNewChat}
-// //       />
-// //       <Chat
-// //         key={activeSessionId}
-// //         sessionId={activeSessionId}
-// //         initialMessages={loadedMessages}
-// //         onSessionCreated={handleSessionCreated}
-// //       />
-// //     </div>
-// //   )
-// // }
-
-
-// // //import Chat from './Chat'
-
-// // export default function App() {
-// //   return <Chat />
-// // }

@@ -1,37 +1,56 @@
+# ── Web framework / server ───────────────────────────────────────────────────
 fastapi
 uvicorn
-python-dotenv
-requests
+python-multipart
+slowapi
+httpx
+
+# ── Config & validation ──────────────────────────────────────────────────────
 pydantic
+python-dotenv
+
+# ── Persistence ──────────────────────────────────────────────────────────────
+sqlalchemy
+aiosqlite
+
+# ── Auth & security ──────────────────────────────────────────────────────────
+passlib[bcrypt]
+bcrypt<4.1
+python-jose[cryptography]
+cryptography
+
+# ── LLM / agent ──────────────────────────────────────────────────────────────
+langgraph
+ollama
 openai
-google-generativeai 
 anthropic
+google-generativeai
+pydantic_ai
+
+# ── Materials science core ───────────────────────────────────────────────────
 ase
+pymatgen
+pymatgen-analysis-defects
+mp-api
+icet
+
+# ── Machine-learned interatomic potentials ───────────────────────────────────
+chgnet
+mattersim
+sevenn
+orb-models
+
+# ── Scientific stack ─────────────────────────────────────────────────────────
 numpy
 pandas
 scipy
 scikit-learn
 matplotlib
 seaborn
-pydantic_ai
-pymatgen
-pymatgen-analysis-defects
-mp-api
-python-dotenv
+optuna
+
+# ── Misc / CLI utilities ─────────────────────────────────────────────────────
+requests
 colorama
 bullet
 yaspin
-icet
-sevenn
-chgnet
-orb-models
-mattersim
-optuna
-fastapi
-uvicorn
-sqlalchemy
-aiosqlite
-python-multipart
-google-generativeai
-httpx
-ollama

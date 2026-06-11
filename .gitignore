@@ -1,18 +1,50 @@
+# ── Python ───────────────────────────────────────────────────────────────────
 venv/
+.venv/
 __pycache__/
 *.pyc
-.env
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
+# ── Secrets / env ────────────────────────────────────────────────────────────
+.env
+*.env
+!*.env.example
+
+# ── Databases (runtime state, not source) ────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+
+# ── Node / frontend ──────────────────────────────────────────────────────────
 node_modules/
 dist/
 build/
+*.local
 
+# ── Application-generated artifacts ──────────────────────────────────────────
 app/storage/
+backend/app/storage/
 storage/
 runs/
 outputs/
 generated/
 
+# Stray VASP artifacts written when tools run with cwd at the backend root
+/backend/POSCAR
+/backend/POSCAR_*
+/backend/CONTCAR*
+/backend/INCAR*
+/backend/KPOINTS*
+
+# ── Large datasets & model weights (provisioned out-of-band) ─────────────────
+/data/
+/pre_trained_models/
+
+# ── Logs & OS noise ──────────────────────────────────────────────────────────
 *.log
 .DS_Store
-
+.idea/
+.vscode/

@@ -3,8 +3,8 @@ import re
 import shutil
 from pathlib import Path
 
-# all session files live here, relative to where uvicorn runs
-STORAGE_ROOT = Path("app/storage/runs")
+# absolute path — never depends on the CWD the server was started from
+STORAGE_ROOT = Path(__file__).resolve().parent.parent / "storage" / "runs"
 
 # ── allowed upload extensions ─────────────────────────────────────────────────
 # VASP files have no extension — handled by name check
@@ -23,10 +23,10 @@ BLOCKED_EXTENSIONS = {
 
 
 def get_session_dir(session_id: str) -> Path:
-    """Return the session folder, creating it if needed."""
+    """Return the absolute session folder path, creating it if needed."""
     folder = STORAGE_ROOT / session_id
     folder.mkdir(parents=True, exist_ok=True)
-    return folder
+    return folder.resolve()
 
 
 def get_upload_dir(session_id: str) -> Path:

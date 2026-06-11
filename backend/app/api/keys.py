@@ -1,63 +1,51 @@
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+"""API-key manager endpoints."""
 
+import os
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.security import get_current_user
+from app.core.encryption import encrypt_value
 from app.database.db import get_db
-from app.database.models import ApiKey
+from app.database.models import User
+from app.repositories import api_key_repository
+from app.schemas.key import ApiKeyIn, ApiKeyOut
+from app.services.key_service import KEY_ENV_MAP
 
 router = APIRouter()
 
 
-class ApiKeyIn(BaseModel):
-    service:   str    # "mp", "openai", etc.
-    key_value: str
-
-
-class ApiKeyOut(BaseModel):
-    service: str
-    exists:  bool     # never send the actual key back to the frontend
-
-
-# ── POST /api/keys — save or update a key ────────────────────────────────────
-
-@router.post('/keys', response_model=ApiKeyOut)
-async def save_api_key(body: ApiKeyIn, db: AsyncSession = Depends(get_db)):
+@router.post("/keys", response_model=ApiKeyOut)
+async def save_api_key(
+    body: ApiKeyIn,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    service = body.service.strip().lower()
+    if not service:
+        raise HTTPException(status_code=400, detail="Service is required")
     if not body.key_value.strip():
-        raise HTTPException(status_code=400, detail='Key cannot be empty')
+        raise HTTPException(status_code=400, detail="Key cannot be empty")
 
-    result = await db.execute(
-        select(ApiKey).where(ApiKey.service == body.service)
-    )
-    existing = result.scalar_one_or_none()
+    encrypted = encrypt_value(body.key_value.strip())
+    await api_key_repository.upsert(db, user_id=current_user.id,
+                                    service=service, key_value=encrypted)
 
-    if existing:
-        existing.key_value = body.key_value.strip()
-    else:
-        db.add(ApiKey(service=body.service, key_value=body.key_value.strip()))
-
-    await db.commit()
-
-    # also set it in the current process env so tools can use it immediately
-    import os
-    key_env_map = {
-        'mp':       'MP_API_KEY',
-        'openai':   'OPENAI_API_KEY',
-        'anthropic':'ANTHROPIC_API_KEY',
-    }
-    env_name = key_env_map.get(body.service)
+    # Inject immediately so same-process tool calls can use it.
+    env_name = KEY_ENV_MAP.get(service)
     if env_name:
         os.environ[env_name] = body.key_value.strip()
 
-    return ApiKeyOut(service=body.service, exists=True)
+    return ApiKeyOut(service=service, exists=True)
 
 
-# ── GET /api/keys/{service} — check if a key exists ─────────────────────────
-
-@router.get('/keys/{service}', response_model=ApiKeyOut)
-async def check_api_key(service: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(ApiKey).where(ApiKey.service == service)
-    )
-    existing = result.scalar_one_or_none()
+@router.get("/keys/{service}", response_model=ApiKeyOut)
+async def check_api_key(
+    service: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    service = service.strip().lower()
+    existing = await api_key_repository.get(db, user_id=current_user.id, service=service)
     return ApiKeyOut(service=service, exists=existing is not None)

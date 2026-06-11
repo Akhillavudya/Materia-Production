@@ -1,78 +1,51 @@
-import os  # Python module for OS-related work like environment variables, file paths, etc.
+"""FastAPI application factory and startup."""
 
-from dotenv import load_dotenv  # Used to load values from the .env file
+from dotenv import load_dotenv
+load_dotenv()
 
-load_dotenv()  # Reads .env file and makes those values available to the backend
-
-
-from fastapi import FastAPI  # Main class used to create a FastAPI backend app
-
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-# CORS allows frontend and backend to communicate
-# Example:
-# Frontend: http://localhost:5173
-# Backend:  http://localhost:8000
-from app.api.upload import router as upload_router
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
+from app.core.config import settings
+from app.core.limiter import limiter
+from app.core.logging import configure_logging, get_logger
+from app.api.auth import router as auth_router
 from app.api.chat import router as chat_router
-# Import router from app/api/chat.py
-# router = group of API routes like /chat, /sessions, /files, etc.
-# We rename it to chat_router for clarity
-
-
+from app.api.keys import router as keys_router
+from app.api.upload import router as upload_router
 from app.database.db import init_db
-# init_db is a function that initializes the database
-# It may create tables if they do not already exist
 
+configure_logging()
+logger = get_logger(__name__)
 
-# Create the main FastAPI application
-app = FastAPI(title="Materia Production Backend")
+app = FastAPI(title=settings.app_name)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
-
-# Add CORS middleware
-# This gives permission for frontend to call backend APIs
 app.add_middleware(
     CORSMiddleware,
-
-    allow_origins=["*"],
-    # "*" means any frontend can call this backend
-    # Good for development
-    # In production, use only your frontend domain
-
+    allow_origins=settings.allowed_origins,
     allow_credentials=True,
-    # Allows cookies/auth credentials if needed
-
     allow_methods=["*"],
-    # Allows all HTTP methods:
-    # GET, POST, PUT, DELETE, PATCH, etc.
-
     allow_headers=["*"],
-    # Allows all request headers
 )
 
+app.include_router(auth_router, prefix="/api")
+app.include_router(chat_router, prefix="/api")
+app.include_router(upload_router, prefix="/api")
+app.include_router(keys_router, prefix="/api")
 
-# This function runs automatically when backend starts
+
 @app.on_event("startup")
 async def startup():
-    # Initialize database before backend starts handling requests
     await init_db()
+    logger.info("Materia backend started — %s", settings.app_name)
 
 
-# Attach all routes from chat.py to this main app
-# Because prefix="/api", every route inside chat.py starts with /api
-#
-# Example:
-# In chat.py: @router.post("/chat")
-# Final URL:  POST /api/chat
-#
-# In chat.py: @router.get("/sessions")
-# Final URL:  GET /api/sessions
-app.include_router(chat_router, prefix="/api")
-app.include_router(upload_router, prefix='/api') 
-
-# Simple test route
-# Open http://localhost:8000/ in browser
-# It should return: {"message": "Materia backend is running"}
 @app.get("/")
 def root():
     return {"message": "Materia backend is running"}
