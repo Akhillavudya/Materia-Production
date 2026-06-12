@@ -141,7 +141,8 @@ Responsibilities by layer:
   the simulation services and persist progress/artifacts.
 - **Repositories (`repositories/`)** — every SQL query, including `jobs`.
 - **Domain models (`schemas/` + `domain/`)** — Pydantic request/response **and**
-  the cross-cutting `MaterialCard`, `JobRecord`, `VaspInputSet`.
+  the cross-cut
+  ting `MaterialCard`, `JobRecord`, `VaspInputSet`.
 
 ---
 

@@ -11,11 +11,18 @@ HTTP, no SQL here.
   run_md_simulation     — ASE NVT / NPT molecular dynamics
 """
 
+import hashlib
+import json
+import uuid
 from pathlib import Path
 from typing import Optional
 
+from app.core.context import get_session_id, get_user_id
 from app.core.logging import get_logger
+from app.domain.jobs import JobType
 from app.domain.vasp import CellRelax, VaspTask
+from app.jobs import store
+from app.jobs.queue import enqueue
 from app.services.search import MaterialQuery, search_service
 from app.services.storage.file_service import (
     find_structure_in_session,
@@ -26,6 +33,62 @@ from app.services.storage.file_service import (
 from app.services.vasp.service import vasp_service
 
 logger = get_logger(__name__)
+
+
+def _enqueue_job(
+    job_type: JobType,
+    *,
+    poscar_path: Path,
+    output_dir: Path,
+    params: dict,
+    calculator: dict,
+    emit_vasp_inputs: bool,
+) -> dict:
+    """Create a job row (owned by the current user/session) and dispatch it.
+
+    Returns the uniform queued envelope the agent streams back; the actual
+    compute runs in a separate worker (redesign §11).
+    """
+    user_id = get_user_id()
+    session_id = get_session_id()
+    if not user_id or not session_id:
+        return {"status": "error",
+                "message": "No authenticated session — cannot start a job."}
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    spec = {
+        "poscar_path": str(poscar_path),
+        "output_dir": str(output_dir),
+        "params": params,
+        "calculator": calculator,
+        "emit_vasp_inputs": emit_vasp_inputs,
+    }
+    spec_hash = hashlib.sha256(
+        json.dumps({"s": session_id, "t": job_type.value, "p": params}, sort_keys=True).encode()
+    ).hexdigest()[:16]
+    job_id = uuid.uuid4().hex
+
+    try:
+        store.create_job(
+            job_id=job_id, user_id=user_id, session_id=session_id,
+            job_type=job_type.value, spec=spec, calculator=calculator,
+            spec_hash=spec_hash,
+        )
+        enqueue(job_type, job_id)
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Job enqueue failed")
+        return {"status": "error", "message": f"Could not start job: {e}"}
+
+    return {
+        "status":  "queued",
+        "job_id":  job_id,
+        "type":    job_type.value,
+        "track":   f"/api/jobs/{job_id}",
+        "message": (
+            f"Started {job_type.value} job — tracking as {job_id[:8]}. "
+            "Live progress and results will appear in the job dashboard."
+        ),
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -206,7 +269,11 @@ def optimize_structure(
     calculator_model: Optional[str] = None,
     emit_vasp_inputs: bool          = True,
 ) -> dict:
-    """Run ASE geometry optimization on a structure in the current session."""
+    """Queue an ASE geometry optimization job for a structure in the session.
+
+    Long-running, so this enqueues a job and returns immediately with a
+    ``job_id``; progress and results are tracked via ``/api/jobs`` (redesign §11).
+    """
     cell_relax = cell_relax.lower().strip()
     if cell_relax not in ("none", "shape", "full"):
         return {"status": "error", "message": f"Invalid cell_relax '{cell_relax}'. Use: none | shape | full"}
@@ -226,35 +293,19 @@ def optimize_structure(
     except FileNotFoundError as e:
         return {"status": "error", "message": str(e)}
 
-    output_dir = session_path() / "optimization"
-    output_dir.mkdir(parents=True, exist_ok=True)
     calc_cfg: dict = {"type": calculator_type.lower()}
     if calculator_model:
         calc_cfg["model"] = calculator_model
 
-    from app.services.simulation.optimization import run_optimization
-    result = run_optimization(
-        poscar_path=str(poscar_path), output_dir=str(output_dir),
-        fmax=fmax, cell_relax=cell_relax, optimizer=optimizer,
-        max_steps=max_steps, calculator=calc_cfg, generate_vasp_inputs=emit_vasp_inputs,
+    return _enqueue_job(
+        JobType.OPTIMIZE,
+        poscar_path=poscar_path,
+        output_dir=session_path() / "optimization",
+        params={"fmax": fmax, "cell_relax": cell_relax,
+                "optimizer": optimizer, "max_steps": max_steps},
+        calculator=calc_cfg,
+        emit_vasp_inputs=emit_vasp_inputs,
     )
-
-    if result.get("status") == "error":
-        return result
-
-    files = result.get("files", {})
-    result["files"] = {
-        k: (rel_to_storage(Path(v)) if v and Path(v).exists() else None)
-        for k, v in files.items()
-    }
-
-    conv_label = "Converged" if result.get("converged") else "Not converged"
-    result["message"] = (
-        f"{conv_label} — {result.get('formula', '')} ({result.get('n_sites', '?')} atoms), "
-        f"E = {result.get('final_energy', '?')} eV, fmax = {result.get('final_fmax', '?')} eV/Å "
-        f"after {result.get('steps', '?')} steps ({result.get('elapsed_s', '?')}s)."
-    )
-    return result
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -274,75 +325,38 @@ def run_md_simulation(
     log_interval:     int           = 10,
     emit_vasp_inputs: bool          = True,
 ) -> dict:
-    """Run ASE Molecular Dynamics (NVT or NPT) on a session structure."""
+    """Queue an ASE Molecular Dynamics (NVT/NPT) job for a session structure.
+
+    Long-running, so this enqueues a job and returns a ``job_id`` immediately;
+    progress/results are tracked via ``/api/jobs`` (redesign §11).
+    """
     ensemble = ensemble.lower().strip()
     if ensemble not in ("nvt", "npt"):
         return {"status": "error", "message": f"Invalid ensemble '{ensemble}'. Use: nvt | npt"}
 
-    thermostat = thermostat.lower().strip()
+    thermostat = thermostat.lower().strip() or ("langevin" if ensemble == "nvt" else "berendsen")
 
     temperature   = max(float(temperature), 1.0)
     nsw           = max(int(nsw), 1)
     timestep      = max(float(timestep), 0.1)
     log_interval  = max(int(log_interval), 1)
-    total_time_ps = (nsw * timestep) / 1000.0
 
     try:
         poscar_path = find_structure_in_session(poscar_name, prefer_contcar=True)
     except FileNotFoundError as e:
         return {"status": "error", "message": str(e)}
 
-    output_dir = session_path() / "md_simulation"
-    output_dir.mkdir(parents=True, exist_ok=True)
     calc_cfg: dict = {"type": calculator_type.lower()}
     if calculator_model:
         calc_cfg["model"] = calculator_model
 
-    from app.services.simulation.md import run_md
-    result = run_md(
-        poscar_path=str(poscar_path), output_dir=str(output_dir),
-        ensemble=ensemble, temperature=temperature, nsw=nsw, timestep=timestep,
-        thermostat=thermostat or ("langevin" if ensemble == "nvt" else "berendsen"),
-        pressure=pressure, log_interval=log_interval,
-        calculator=calc_cfg, generate_vasp_inputs=emit_vasp_inputs,
+    return _enqueue_job(
+        JobType.MD,
+        poscar_path=poscar_path,
+        output_dir=session_path() / "md_simulation",
+        params={"ensemble": ensemble, "temperature": temperature, "nsw": nsw,
+                "timestep": timestep, "thermostat": thermostat,
+                "pressure": pressure, "log_interval": log_interval},
+        calculator=calc_cfg,
+        emit_vasp_inputs=emit_vasp_inputs,
     )
-
-    if result.get("status") == "error":
-        return result
-
-    files = result.get("files", {})
-    rel_files: dict = {
-        k: (rel_to_storage(Path(v)) if v and Path(v).exists() else None)
-        for k, v in files.items()
-    }
-
-    try:
-        from app.services.simulation.plots import generate_md_plots
-        plots = generate_md_plots(
-            energy_csv=str(output_dir / "md_energy.csv"),
-            temp_csv=str(output_dir / "md_temp.csv"),
-            output_dir=str(output_dir),
-        )
-        rel_files["plot_energy"] = rel_to_storage(Path(plots["energy_png"])) if plots.get("energy_png") else None
-        rel_files["plot_temp"]   = rel_to_storage(Path(plots["temp_png"]))   if plots.get("temp_png")   else None
-    except Exception as e:
-        logger.warning("MD plot generation failed: %s", e)
-        rel_files["plot_energy"] = None
-        rel_files["plot_temp"]   = None
-
-    result["files"]         = rel_files
-    result["total_time_ps"] = round(total_time_ps, 3)
-
-    mean_T  = result.get("mean_temperature")
-    final_E = result.get("final_energy")
-    steps   = result.get("steps_completed", nsw)
-    elapsed = result.get("elapsed_s", "?")
-
-    result["message"] = (
-        f"MD ({ensemble.upper()}, {thermostat}) completed — "
-        f"{result.get('formula', '')} ({result.get('n_sites', '?')} atoms), "
-        f"{steps} steps × {timestep} fs = {total_time_ps:.3f} ps, "
-        f"T_target = {temperature} K, T_mean = {mean_T} K, "
-        f"E_final = {final_E} eV (wall time: {elapsed}s)."
-    )
-    return result

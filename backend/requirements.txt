@@ -12,6 +12,14 @@ python-dotenv
 # ── Persistence ──────────────────────────────────────────────────────────────
 sqlalchemy
 aiosqlite
+# PostgreSQL drivers (async for the web app, sync for the Celery worker)
+asyncpg
+psycopg2-binary
+alembic
+
+# ── Async job system (redesign §11) ──────────────────────────────────────────
+celery[redis]
+redis
 
 # ── Auth & security ──────────────────────────────────────────────────────────
 passlib[bcrypt]

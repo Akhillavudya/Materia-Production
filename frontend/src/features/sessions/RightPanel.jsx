@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import FilePanel    from '../files/FilePanel'
-import JobDashboard from './JobDashboard'
+import FilePanel      from '../files/FilePanel'
+import JobDashboard   from './JobDashboard'
+import AsyncJobsPanel from './AsyncJobsPanel'
 
 
 export default function RightPanel({
@@ -68,11 +69,14 @@ export default function RightPanel({
             refreshTrigger={filePanelRefresh}
           />
         ) : (
-          <JobDashboard
-            sessionId={sessionId}
-            refreshTrigger={jobRefresh}
-            onRerun={onRerun}
-          />
+          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+            <AsyncJobsPanel sessionId={sessionId} />
+            <JobDashboard
+              sessionId={sessionId}
+              refreshTrigger={jobRefresh}
+              onRerun={onRerun}
+            />
+          </div>
         )}
       </div>
 

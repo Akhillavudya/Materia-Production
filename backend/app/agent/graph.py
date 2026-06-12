@@ -30,6 +30,7 @@ from langgraph.graph import StateGraph, END
 from app.agent.llm import stream_chat          # used only for conversational answers
 from app.agent.tool_registry import CALLABLE_TOOL_MAP, TOOL_MAP
 from app.core.config import settings
+from app.core.context import set_request_identity
 from app.core.logging import get_logger
 from app.services.storage.file_service import (
     get_session_dir,
@@ -94,6 +95,7 @@ async def ollama_raw(system: str, user: str) -> str:
 class AgentState(TypedDict):
     messages:        list[dict]   # full conversation for LLM
     session_id:      str
+    user_id:         int | None   # owner — needed to create job rows
     session_dir:     str
     queue:           Any          # asyncio.Queue[str|None]
 
@@ -340,11 +342,14 @@ async def tool_executor_node(state: AgentState) -> dict:
             raise ValueError(f"Function {tool_name} is not registered as a callable tool")
 
         _sdir = session_dir   # capture for closure
+        _uid  = state.get("user_id")
+        _sid  = session_id
 
         def _run_tool():
-            # Set session dir inside the thread — ContextVar propagation
-            # from async→thread is unreliable; explicit set is guaranteed.
+            # Set session dir + request identity inside the thread — ContextVar
+            # propagation from async→thread is unreliable; explicit set is guaranteed.
             _session_dir_var.set(_sdir)
+            set_request_identity(_uid, _sid)
             return tool_fn(**tool_args)
 
         loop   = asyncio.get_running_loop()
@@ -379,12 +384,23 @@ async def tool_executor_node(state: AgentState) -> dict:
                 "files_written",
                 "source",
                 "material_id",
+                "job_id",
+                "type",
+                "track",
             ):
                 if key in result:
                     tool_result_obj[key] = result[key]
 
         await q_put(queue, f"data: [TOOL_END:{tool_name}:{status}]\n\n")
         await q_put(queue, f"data: [FILES:{json.dumps(tool_result_obj)}]\n\n")
+
+        # A long tool returns a queued job — tell the frontend to attach the
+        # dashboard without parsing prose (redesign §13 SSE contract).
+        if isinstance(result, dict) and result.get("job_id"):
+            job_event = {"job_id": result["job_id"],
+                         "type": result.get("type"),
+                         "status": result.get("status", "queued")}
+            await q_put(queue, f"data: [JOB:{json.dumps(job_event)}]\n\n")
 
         return {"error": None, "_last_result": tool_result_obj}
 
@@ -602,6 +618,7 @@ AGENT_GRAPH = build_graph()
 async def run_agent(
     messages:   list[dict],
     session_id: str,
+    user_id:    int | None = None,
 ) -> AsyncGenerator[str, None]:
     session_dir = str(get_session_dir(session_id))
     queue: asyncio.Queue[str | None] = asyncio.Queue()
@@ -609,6 +626,7 @@ async def run_agent(
     initial_state: AgentState = {
         "messages":        messages,
         "session_id":      session_id,
+        "user_id":         user_id,
         "session_dir":     session_dir,
         "queue":           queue,
         "plan":            [],

@@ -219,7 +219,7 @@ async def chat(
         full_response: list[str] = []
         all_tool_results: list[dict] = []
 
-        async for sse in run_agent(messages_for_llm, session_id):
+        async for sse in run_agent(messages_for_llm, session_id, user_id=current_user.id):
             yield sse
 
             if sse.startswith("data: {"):

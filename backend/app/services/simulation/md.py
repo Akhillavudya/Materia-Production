@@ -40,8 +40,9 @@ Usage
 import csv
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
+from app.domain.jobs import JobCancelled
 from app.services.simulation.calculator_factory import get_calculator
 from app.services.vasp.incar import generate_incar
 from app.services.vasp.kpoints import generate_kpoints
@@ -62,6 +63,7 @@ def run_md(
     log_interval:         int           = 10,
     calculator:           Optional[dict] = None,
     generate_vasp_inputs: bool          = True,
+    progress_callback:    Optional[Callable[..., None]] = None,
 ) -> dict:
     """
     Run ASE Molecular Dynamics.
@@ -169,14 +171,23 @@ def run_md(
         energy_log.append({"step": step, "time_fs": round(time_fs, 3), "energy_eV": round(e, 6)})
         temp_log.append(  {"step": step, "time_fs": round(time_fs, 3), "temperature_K": round(T, 3)})
 
+        # Report progress (callback may raise JobCancelled to stop the run early).
+        if progress_callback is not None:
+            progress_callback(step=step, energy=round(e, 6),
+                              temperature=round(T, 3), total=nsw)
+
     dyn.attach(_log_step, interval=log_interval)
 
     # ── 6. Run ────────────────────────────────────────────────────────────────
     t0 = time.time()
     steps_done = 0
+    cancelled = False
     try:
         dyn.run(nsw)
         steps_done = nsw
+    except JobCancelled:
+        cancelled = True
+        steps_done = len(energy_log) * log_interval
     except Exception as e:
         # Partial run — save what we have
         steps_done = len(energy_log) * log_interval
@@ -244,8 +255,9 @@ def run_md(
     final_E   = energy_log[-1]["energy_eV"] if energy_log else None
     total_fs  = steps_done * timestep
 
+    verb = "was cancelled after" if cancelled else "completed"
     message = (
-        f"MD ({ensemble.upper()}) completed {steps_done} steps "
+        f"MD ({ensemble.upper()}) {verb} {steps_done} steps "
         f"({total_fs:.1f} fs) at {temperature_K} K. "
         f"Mean T = {mean_T:.1f} K, Final E = {final_E} eV. "
         f"Wall time: {elapsed}s."
@@ -253,7 +265,7 @@ def run_md(
     print(f"[MD] {message}")
 
     return {
-        "status":            "success",
+        "status":            "cancelled" if cancelled else "success",
         "message":           message,
         "steps_completed":   steps_done,
         "total_time_fs":     total_fs,

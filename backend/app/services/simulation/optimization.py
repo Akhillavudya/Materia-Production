@@ -41,8 +41,9 @@ import os
 import csv
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
+from app.domain.jobs import JobCancelled
 from app.services.simulation.calculator_factory import get_calculator
 from app.services.vasp.incar import generate_incar
 from app.services.vasp.kpoints import generate_kpoints
@@ -59,6 +60,7 @@ def run_optimization(
     max_steps:            int           = 1000,
     calculator:           Optional[dict] = None,
     generate_vasp_inputs: bool          = True,
+    progress_callback:    Optional[Callable[..., None]] = None,
 ) -> dict:
     """
     Run ASE geometry optimization.
@@ -154,18 +156,26 @@ def run_optimization(
     def _record():
         try:
             e    = opt_atoms.get_potential_energy()
-            fmax = _get_fmax(opt_atoms)
+            fmax_now = _get_fmax(opt_atoms)
             step = len(energy_log)
-            energy_log.append({"step": step, "energy_eV": round(e, 6), "fmax_eV_A": round(fmax, 6)})
+            energy_log.append({"step": step, "energy_eV": round(e, 6), "fmax_eV_A": round(fmax_now, 6)})
         except Exception:
-            pass
+            return
+        # Report progress (and let the callback raise JobCancelled to stop early).
+        if progress_callback is not None:
+            progress_callback(step=step, energy=round(e, 6), fmax=round(fmax_now, 6),
+                              total=max_steps)
 
     opt.attach(_record, interval=1)
 
     # ── 7. Run ────────────────────────────────────────────────────────────────
     t0 = time.time()
+    cancelled = False
     try:
         converged = opt.run(fmax=fmax, steps=max_steps)
+    except JobCancelled:
+        cancelled = True
+        converged = False
     except Exception as e:
         return {"status": "error", "message": f"Optimization failed: {e}"}
 
@@ -221,8 +231,14 @@ def run_optimization(
     final_energy = energy_log[-1]["energy_eV"] if energy_log else None
     final_fmax   = energy_log[-1]["fmax_eV_A"] if energy_log else None
 
-    status  = "converged" if converged else "not_converged"
-    conv_str = "converged" if converged else f"did not converge in {steps} steps"
+    if cancelled:
+        status = "cancelled"
+    else:
+        status = "converged" if converged else "not_converged"
+    conv_str = (
+        "was cancelled" if cancelled
+        else ("converged" if converged else f"did not converge in {steps} steps")
+    )
     message = (
         f"Optimization {conv_str}. "
         f"Formula: {formula}, E = {final_energy} eV, "

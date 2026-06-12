@@ -16,6 +16,7 @@ from app.api.auth import router as auth_router
 from app.api.catalog import router as catalog_router
 from app.api.chat import router as chat_router
 from app.api.files import router as files_router
+from app.api.jobs import router as jobs_router
 from app.api.keys import router as keys_router
 from app.api.upload import router as upload_router
 from app.database.db import init_db
@@ -42,6 +43,7 @@ app.include_router(upload_router, prefix="/api")
 app.include_router(keys_router, prefix="/api")
 app.include_router(files_router, prefix="/api")
 app.include_router(catalog_router, prefix="/api")
+app.include_router(jobs_router, prefix="/api")
 
 
 @app.on_event("startup")
