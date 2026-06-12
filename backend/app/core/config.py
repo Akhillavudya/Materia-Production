@@ -61,9 +61,26 @@ class Settings(BaseModel):
     pmg_vasp_psp_dir: str | None = None
 
     # ── LLM provider ─────────────────────────────────────────────────────────
+    # The agent uses native function-calling (redesign §15). `model_provider`
+    # selects the backend: "gemini" (hosted default), "ollama" (offline/local).
+    # When unset it auto-resolves to "gemini" if a GEMINI_API_KEY is present,
+    # otherwise "ollama".
     model_provider: str | None = None
+    # Gemini (Google AI Studio free tier — native function calling)
+    gemini_api_key: str | None = None
+    gemini_model: str = "gemini-2.5-flash"
+    # Ollama (local fallback; qwen3 supports native tools)
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "qwen3:14b"
+
+    @property
+    def resolved_provider(self) -> str:
+        """The effective LLM provider after auto-detection."""
+        if self.model_provider:
+            return self.model_provider.lower().strip()
+        if self.gemini_api_key or os.getenv("GEMINI_API_KEY"):
+            return "gemini"
+        return "ollama"
 
     @property
     def database_url(self) -> str:
@@ -125,6 +142,8 @@ def get_settings() -> Settings:
         vasp_ncore=(int(os.environ["VASP_NCORE"]) if os.getenv("VASP_NCORE") else None),
         pmg_vasp_psp_dir=os.getenv("PMG_VASP_PSP_DIR"),
         model_provider=os.getenv("MODEL_PROVIDER"),
+        gemini_api_key=os.getenv("GEMINI_API_KEY"),
+        gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
         ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
         ollama_model=os.getenv("OLLAMA_MODEL", "qwen3:14b"),
     )

@@ -1,35 +1,28 @@
+"""Native function-calling agent for Materia (redesign §15).
 
-# app/core/agent.py
-#
-# LangGraph agent for MatMind
-#
-# Graph:
-#   planner → step_picker → tool_executor → result_injector
-#                 ↑                               |
-#                 └──────── done_checker ←────────┘
-#                                |
-#                           summarizer → END
-#
-# Key fixes vs previous version:
-#   1. ollama_raw() — bypasses stream_chat's SYSTEM_PROMPT for internal calls
-#   2. Single-call planner — asks "JSON or []" directly, no broken classifier
-#   3. summarizer — template-based, no extra LLM call (fast + reliable)
-#   4. Every exit path sends [DONE] + [SESSION:] so frontend never hangs
+The model itself decides when to call the four tools and writes the final
+answer. There is **no** regex/JSON-from-prose planning anymore — tool calls
+arrive as structured data from the provider (`agent/llm.py` → Gemini | Ollama),
+the loop executes them, feeds results back, and repeats until the model returns a
+plain answer.
+
+Streaming SSE contract (unchanged — consumed by `api/chat.py` and the frontend):
+    data: {"type":"status","value":...}   data: {"type":"token","value":...}
+    data: [TOOL_START:<tool>]             data: [TOOL_END:<tool>:<status>]
+    data: [FILES:{...}]                   data: [JOB:{...}]
+    data: [DONE]                          data: [SESSION:<id>]
+"""
 
 import asyncio
-import httpx
 import json
-import os
-import re
 import time
 from pathlib import Path
-from typing import AsyncGenerator, Any, TypedDict
+from typing import Any, AsyncGenerator
 
-from langgraph.graph import StateGraph, END
-
-from app.agent.llm import stream_chat          # used only for conversational answers
+from app.agent.llm import get_provider
+from app.agent.providers.base import ToolCall
+from app.agent.tool_schemas import TOOL_SPECS
 from app.agent.tool_registry import CALLABLE_TOOL_MAP, TOOL_MAP
-from app.core.config import settings
 from app.core.context import set_request_identity
 from app.core.logging import get_logger
 from app.services.storage.file_service import (
@@ -41,74 +34,46 @@ from app.services.storage.file_service import (
 
 logger = get_logger(__name__)
 
-# ── Ollama connection (centralized in app.core.config) ────────────────────────
-OLLAMA_BASE_URL = settings.ollama_base_url
-OLLAMA_MODEL    = settings.ollama_model
+# Safety cap on tool-call rounds per user turn (prevents runaway loops).
+MAX_TURNS = 6
+
+# Streamed text larger than this between tool rounds is unusual — kept only as a
+# guard so a misbehaving model can't flood the stream.
+THINKING_STATUS = "🧠 Thinking…"
+
+
+SYSTEM_PROMPT = """\
+You are Materia AI, an expert computational-materials-science assistant. You help \
+users search materials databases, generate VASP inputs, and run atomistic \
+simulations by calling the tools provided to you.
+
+You have exactly four tools:
+- search_materials — find materials by formula / element / properties.
+- generate_vasp_inputs — build POSCAR + INCAR + KPOINTS for a material (fast).
+- optimize_structure — relax a session structure with an ML potential (async job).
+- run_md_simulation — run NVT/NPT molecular dynamics (async job).
+
+Rules:
+- When the user names a material by formula (e.g. "MoS2", "NaCl"), call \
+search_materials FIRST, then pass the real `material_id` and `source` from the \
+results to generate_vasp_inputs. Never invent an id.
+- When the user gives a database id directly (e.g. "mp-19306"), you may call \
+generate_vasp_inputs without searching.
+- optimize_structure and run_md_simulation operate on a structure already in the \
+session and are long-running: they return a job_id immediately. After calling \
+one, tell the user the job has started and that progress appears in the job \
+dashboard — do NOT claim final results you do not have.
+- After a search, present the results as a compact Markdown table (id, formula, \
+source, band gap, formation energy).
+- For conceptual questions, greetings, or anything answerable from the \
+conversation, just reply directly — do not call a tool.
+- Be concise, accurate, and scientific. Use Markdown.
+"""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ollama_raw — direct Ollama call with a CUSTOM system prompt.
-# DOES NOT use SYSTEM_PROMPT from llm.py.
-# Used for planner so Qwen3 doesn't answer as Materia instead of planning.
-# ─────────────────────────────────────────────────────────────────────────────
-
-async def ollama_raw(system: str, user: str) -> str:
-    """
-    Call Ollama with only a system + user message.
-    Returns the complete response text with <think> blocks stripped.
-    """
-    messages = [
-        {"role": "system", "content": system},
-        {"role": "user",   "content": user},
-    ]
-    parts = []
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        async with client.stream(
-            "POST",
-            f"{OLLAMA_BASE_URL}/api/chat",
-            json={"model": OLLAMA_MODEL, "messages": messages, "stream": True, "options": {"num_predict": 2048}},
-        ) as resp:
-            resp.raise_for_status()
-            async for line in resp.aiter_lines():
-                if not line.strip():
-                    continue
-                try:
-                    chunk = json.loads(line)
-                    token = chunk.get("message", {}).get("content", "")
-                    if token:
-                        parts.append(token)
-                    if chunk.get("done"):
-                        break
-                except json.JSONDecodeError:
-                    continue
-
-    raw = "".join(parts)
-    # strip Qwen3 <think>...</think> blocks
-    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
-    return raw
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# AgentState
-# ─────────────────────────────────────────────────────────────────────────────
-
-class AgentState(TypedDict):
-    messages:        list[dict]   # full conversation for LLM
-    session_id:      str
-    user_id:         int | None   # owner — needed to create job rows
-    session_dir:     str
-    queue:           Any          # asyncio.Queue[str|None]
-
-    plan:            list[dict]   # [{"tool":..,"args":..,"reason":..}, ...]
-    current_step:    dict | None
-    completed_steps: list[str]
-    step_results:    list[dict]
-    error:           str | None
-    _last_result:    dict | None  # temp between tool_executor → result_injector
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# POSCAR helpers (unchanged from your original)
+# Argument resolution helpers (carried over — still useful as safety nets even
+# though the model usually passes concrete values).
 # ─────────────────────────────────────────────────────────────────────────────
 
 POSCAR_ARG_KEYS = ["poscar_path", "poscar_name"]
@@ -117,7 +82,6 @@ POSCAR_ARG_KEYS = ["poscar_path", "poscar_name"]
 def resolve_args(tool_name: str, tool_args: dict, session_dir: str) -> dict:
     """Resolve 'auto'/missing structure-file args to the best POSCAR in session."""
     resolved = dict(tool_args)
-
     for key in POSCAR_ARG_KEYS:
         if key not in resolved:
             continue
@@ -126,12 +90,8 @@ def resolve_args(tool_name: str, tool_args: dict, session_dir: str) -> dict:
             best = find_best_poscar(session_dir)
             if best:
                 resolved[key] = best
-                logger.info(f"[Agent] Resolved {key} → {best}")
+                logger.info("[Agent] Resolved %s → %s", key, best)
     return resolved
-
-
-async def q_put(queue: asyncio.Queue, event: str):
-    await queue.put(event)
 
 
 def pick_material_from_results(step_results: list[dict]) -> dict | None:
@@ -147,517 +107,228 @@ def pick_material_from_results(step_results: list[dict]) -> dict | None:
 def auto_fill_material_args(tool_args: dict, step_results: list[dict]) -> dict:
     """Fill material_id/source for generate_vasp_inputs from a prior search."""
     resolved = dict(tool_args)
-
     needs_id = resolved.get("material_id") in (None, "", "auto")
     needs_source = resolved.get("source") in (None, "", "auto")
-
     if not (needs_id or needs_source):
         return resolved
-
     material = pick_material_from_results(step_results)
     if not material:
         return resolved
-
     if needs_id:
         resolved["material_id"] = material.get("id")
     if needs_source:
         resolved["source"] = material.get("source")
-
     return resolved
 
 
 def normalize_tool_status(status: str) -> str:
-    if status == "ok":
-        return "success"
-    return status or "unknown"
-
-
-def fmt_material_value(value: Any) -> str:
-    if value is None:
-        return "-"
-    try:
-        return str(round(float(value), 4))
-    except (TypeError, ValueError):
-        return str(value)
+    return "success" if status == "ok" else (status or "unknown")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# NODE 1 — planner
-#
-# Single ollama_raw() call with a tight JSON-only prompt.
-# If plan is empty → stream a conversational answer via stream_chat and close.
+# Trim a tool result before feeding it back to the model — keep the payload
+# small (esp. material searches) while the full result still goes to the
+# frontend via the [FILES:] event.
 # ─────────────────────────────────────────────────────────────────────────────
 
-TOOL_LIST_STR = "\n".join(
-    f"- {name}: {meta['arg_desc']}"
-    for name, meta in TOOL_MAP.items()
+_MATERIAL_LLM_FIELDS = (
+    "id", "formula", "source", "band_gap_eV", "formation_energy_eV_per_atom",
+    "energy_above_hull_eV_per_atom", "spacegroup_symbol", "dimensionality",
+    "has_structure",
 )
 
-PLANNER_SYSTEM = f"""\
-You are a task planner for a materials simulation assistant.
 
-Given the user's request, decide if tools are needed and output a JSON plan.
-
-OUTPUT RULES:
-- If tools are needed, output ONLY a JSON array.
-- If no tools are needed, output exactly [].
-- Each step must be: {{"tool": "<fn_name>", "args": {{...}}, "reason": "<one sentence>", "show_summary": true/false}}.
-
-WHEN TO USE TOOLS:
-- Search/find materials in databases.
-- Generate VASP inputs (POSCAR + INCAR + KPOINTS) for a material or structure.
-- Optimize (relax) a structure, or run a molecular-dynamics simulation.
-
-WHEN NOT TO USE TOOLS:
-- General concept questions, explanations, greetings, or small talk.
-- Questions already answerable from the visible conversation.
-
-AVAILABLE TOOLS:
-{TOOL_LIST_STR}
-
-PLANNING RULES:
-- For "find/search materials", use search_materials only.
-- For "generate VASP inputs / POSCAR for <formula>", use TWO steps:
-  1. search_materials with the formula/element filters and show_summary false
-  2. generate_vasp_inputs with {{"material_id": "auto", "source": "auto", "task": "relaxation"}} and show_summary true
-- For "generate inputs for mp-123 / c2db-42 / oqmd-12345", call generate_vasp_inputs directly with that material_id (and source if known).
-- For "optimize/relax it", use optimize_structure (auto-detects the session POSCAR).
-- For "run MD / molecular dynamics", use run_md_simulation.
-
-EXAMPLES:
-User: "Search MoS2" -> [{{"tool": "search_materials", "args": {{"formula": "MoS2", "limit": 10}}, "reason": "Search databases for MoS2", "show_summary": true}}]
-User: "Generate VASP relaxation inputs for NaCl" -> [{{"tool": "search_materials", "args": {{"formula": "NaCl", "limit": 5}}, "reason": "Find a NaCl structure", "show_summary": false}}, {{"tool": "generate_vasp_inputs", "args": {{"material_id": "auto", "source": "auto", "task": "relaxation"}}, "reason": "Generate VASP inputs from the best matching structure", "show_summary": true}}]
-User: "Relax it with MACE" -> [{{"tool": "optimize_structure", "args": {{"fmax": 0.02, "calculator_type": "mace"}}, "reason": "Optimize the session structure", "show_summary": true}}]
-User: "What is DFT?" -> []
-"""
-
-async def planner_node(state: AgentState) -> dict:
-    queue       = state["queue"]
-    user_msg    = state["messages"][-1]["content"]
-
-    await q_put(queue, f"data: {json.dumps({'type': 'status', 'value': '🧠 Planning…'})}\n\n")
-
-    raw = await ollama_raw(PLANNER_SYSTEM, user_msg)
-    logger.info(f"[Agent] Planner raw: {raw[:120]!r}")
-
-    # extract JSON array — robust against any leading/trailing prose
-    plan = []
-    array_match = re.search(r"\[.*\]", raw, re.DOTALL)
-    if array_match:
-        try:
-            parsed = json.loads(array_match.group(0))
-            if isinstance(parsed, list):
-                plan = [s for s in parsed if isinstance(s, dict) and "tool" in s]
-        except json.JSONDecodeError:
-            pass
-
-    logger.info(f"[Agent] Plan ({len(plan)} steps): {[s['tool'] for s in plan]}")
-
-    if not plan:
-        # ── conversational / explanation answer ───────────────────────────────
-        # Use stream_chat (has SYSTEM_PROMPT) so Materia answers naturally.
-        await q_put(queue, f"data: {json.dumps({'type': 'status', 'value': ''})}\n\n")
-        async for token in stream_chat(state["messages"]):
-            if not token.startswith("\n__TOOL__:"):
-                await q_put(queue, f"data: {json.dumps({'type': 'token', 'value': token})}\n\n")
-        # MUST close the stream here — graph exits to END after this node
-        await q_put(queue, f"data: [DONE]\n\n")
-        await q_put(queue, f"data: [SESSION:{state['session_id']}]\n\n")
-
-    return {
-        "plan":            plan,
-        "completed_steps": [],
-        "step_results":    [],
-        "current_step":    None,
-        "error":           None,
-        "_last_result":    None,
-    }
+def _result_for_llm(result: dict) -> dict:
+    compact = {k: v for k, v in result.items()
+               if k not in ("materials", "files", "potentials")}
+    materials = result.get("materials")
+    if materials:
+        compact["materials"] = [
+            {k: m.get(k) for k in _MATERIAL_LLM_FIELDS if k in m}
+            for m in materials[:10]
+        ]
+    if "files" in result:
+        compact["files"] = result["files"]
+    return compact
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# NODE 2 — step_picker
-# Picks the next uncompleted step from plan (handles duplicate tool names).
+# Tool execution — runs one tool call, emits the SSE side-channel events, and
+# returns the raw result dict (for the [FILES:] payload + LLM feedback).
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def step_picker_node(state: AgentState) -> dict:
-    usage: dict[str, int] = {}
-    for name in state["completed_steps"]:
-        usage[name] = usage.get(name, 0) + 1
-
-    counts: dict[str, int] = {}
-    next_step = None
-    for step in state["plan"]:
-        t = step["tool"]
-        counts[t] = counts.get(t, 0) + 1
-        if counts[t] > usage.get(t, 0):
-            next_step = step
-            break
-
-    logger.info(f"[Agent] step_picker → {next_step['tool'] if next_step else 'DONE'}")
-    return {"current_step": next_step}
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# NODE 3 — tool_executor
-# Runs the Materia tool in a thread pool, streams TOOL_START/END/FILES events.
-# ─────────────────────────────────────────────────────────────────────────────
-
-async def tool_executor_node(state: AgentState) -> dict:
-    step        = state["current_step"]
-    queue       = state["queue"]
-    session_id  = state["session_id"]
-    session_dir = state["session_dir"]
-
-    tool_name = step["tool"]
-    tool_args = dict(step.get("args", {}))
+async def _execute_tool(
+    tc: ToolCall,
+    queue: asyncio.Queue,
+    session_id: str,
+    session_dir: str,
+    user_id: int | None,
+    step_results: list[dict],
+) -> dict:
+    tool_name = tc.name
+    tool_args = dict(tc.args or {})
     tool_meta = TOOL_MAP.get(tool_name)
+    tool_fn = CALLABLE_TOOL_MAP.get(tool_name)
 
-    # ── unknown tool ──────────────────────────────────────────────────────────
-    if not tool_meta:
-        err = f"⚠ Unknown tool: {tool_name}"
-        await q_put(queue, f"data: [TOOL_END:{tool_name}:error]\n\n")
-        await q_put(queue, f"data: {json.dumps({'type': 'token', 'value': err})}\n\n")
-        return {"error": err, "_last_result": None}
+    if not tool_meta or not tool_fn:
+        await queue.put(f"data: [TOOL_END:{tool_name}:error]\n\n")
+        return {"status": "error", "message": f"Unknown tool: {tool_name}"}
 
-    # ── announce + spinner ─────────────────────────────────────────────────────
-    show_summary = step.get("show_summary", True)
-
-    step_reason = step.get("reason", tool_meta["label"])
-    intro_token = f"I'll {step_reason.lower().rstrip('.')}.\n"
-    await q_put(queue, f"data: {json.dumps({'type': 'token', 'value': intro_token})}\n\n")
-
-    await q_put(queue, f"data: [TOOL_START:{tool_name}]\n\n")
     label = tool_meta["label"]
-    await q_put(queue, f"data: {json.dumps({'type': 'status', 'value': f'⚙ {label}…'})}\n\n")
+    await queue.put(f"data: [TOOL_START:{tool_name}]\n\n")
+    await queue.put(f"data: {json.dumps({'type': 'status', 'value': f'⚙ {label}…'})}\n\n")
 
     try:
         tool_args = resolve_args(tool_name, tool_args, session_dir)
         if tool_name == "generate_vasp_inputs":
-            tool_args = auto_fill_material_args(tool_args, state["step_results"])
+            tool_args = auto_fill_material_args(tool_args, step_results)
 
         t_before = time.time()
 
-        tool_fn = CALLABLE_TOOL_MAP.get(tool_name)
-        if not tool_fn:
-            raise ValueError(f"Function {tool_name} is not registered as a callable tool")
-
-        _sdir = session_dir   # capture for closure
-        _uid  = state.get("user_id")
-        _sid  = session_id
+        _sdir, _uid, _sid = session_dir, user_id, session_id
 
         def _run_tool():
-            # Set session dir + request identity inside the thread — ContextVar
-            # propagation from async→thread is unreliable; explicit set is guaranteed.
+            # ContextVar propagation async→thread is unreliable; set explicitly.
             _session_dir_var.set(_sdir)
             set_request_identity(_uid, _sid)
             return tool_fn(**tool_args)
 
-        loop   = asyncio.get_running_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, _run_tool)
 
-        status    = normalize_tool_status(result.get("status",  "unknown")) if isinstance(result, dict) else "unknown"
-        msg       = result.get("message", "")        if isinstance(result, dict) else str(result)
+        status = normalize_tool_status(
+            result.get("status", "unknown")) if isinstance(result, dict) else "unknown"
         new_files = list_new_files(session_id, t_before)
 
-        # ── material / simulation tool result ─────────────────────────────────
-        tool_result_obj = {
-            "tool":         tool_name,
-            "label":        tool_meta["label"],
-            "status":       status,
-            "msg":          msg,
-            "files":        new_files,
-            "show_summary": show_summary,
+        files_payload = {
+            "tool": tool_name,
+            "label": label,
+            "status": status,
+            "msg": result.get("message", "") if isinstance(result, dict) else str(result),
+            "files": new_files,
         }
         if isinstance(result, dict):
             for key in (
-                "materials",
-                "source_used",
-                "sources_tried",
-                "total_matching",
-                "returned",
-                "formula",
-                "n_sites",
-                "task",
-                "encut",
-                "kmesh",
-                "elements",
-                "files_written",
-                "source",
-                "material_id",
-                "job_id",
-                "type",
-                "track",
+                "materials", "source_used", "sources_tried", "total_matching",
+                "returned", "formula", "n_sites", "task", "encut", "kmesh",
+                "elements", "files_written", "source", "material_id",
+                "job_id", "type", "track",
             ):
                 if key in result:
-                    tool_result_obj[key] = result[key]
+                    files_payload[key] = result[key]
 
-        await q_put(queue, f"data: [TOOL_END:{tool_name}:{status}]\n\n")
-        await q_put(queue, f"data: [FILES:{json.dumps(tool_result_obj)}]\n\n")
+        await queue.put(f"data: [TOOL_END:{tool_name}:{status}]\n\n")
+        await queue.put(f"data: [FILES:{json.dumps(files_payload)}]\n\n")
 
-        # A long tool returns a queued job — tell the frontend to attach the
-        # dashboard without parsing prose (redesign §13 SSE contract).
         if isinstance(result, dict) and result.get("job_id"):
-            job_event = {"job_id": result["job_id"],
-                         "type": result.get("type"),
-                         "status": result.get("status", "queued")}
-            await q_put(queue, f"data: [JOB:{json.dumps(job_event)}]\n\n")
+            job_event = {
+                "job_id": result["job_id"],
+                "type": result.get("type"),
+                "status": result.get("status", "queued"),
+            }
+            await queue.put(f"data: [JOB:{json.dumps(job_event)}]\n\n")
 
-        return {"error": None, "_last_result": tool_result_obj}
+        step_results.append(files_payload)
+        return result if isinstance(result, dict) else {"status": status, "message": str(result)}
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         import traceback
         traceback.print_exc()
-        err = str(e)
-        await q_put(queue, f"data: [TOOL_END:{tool_name}:error]\n\n")
-        await q_put(queue, f"data: {json.dumps({'type': 'token', 'value': f'⚠ {err}'})}\n\n")
-        return {"error": err, "_last_result": None}
-
-# ─────────────────────────────────────────────────────────────────────────────
-# NODE 4 — result_injector
-# Records completed step. Prevents re-running.
-# ─────────────────────────────────────────────────────────────────────────────
-
-async def result_injector_node(state: AgentState) -> dict:
-    last      = state.get("_last_result")
-    tool_name = state["current_step"]["tool"] if state["current_step"] else ""
-
-    new_results   = list(state["step_results"])
-    new_completed = list(state["completed_steps"])
-
-    if last:
-        new_results.append(last)
-    new_completed.append(tool_name)   # mark done even on error
-
-    return {
-        "step_results":    new_results,
-        "completed_steps": new_completed,
-        "_last_result":    None,
-    }
+        await queue.put(f"data: [TOOL_END:{tool_name}:error]\n\n")
+        return {"status": "error", "message": str(e)}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# NODE 5 — done_checker  (routing function)
+# The agent loop.
 # ─────────────────────────────────────────────────────────────────────────────
 
-def done_checker_node(state: AgentState) -> str:
-    completed_counts: dict[str, int] = {}
-    for name in state["completed_steps"]:
-        completed_counts[name] = completed_counts.get(name, 0) + 1
+async def _agent_loop(
+    messages: list[dict],
+    session_id: str,
+    user_id: int | None,
+    session_dir: str,
+    queue: asyncio.Queue,
+) -> None:
+    provider = get_provider()
 
-    plan_counts: dict[str, int] = {}
-    for step in state["plan"]:
-        t = step["tool"]
-        plan_counts[t] = plan_counts.get(t, 0) + 1
+    conv: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}] + [
+        {"role": m["role"], "content": m.get("content", "")} for m in messages
+    ]
+    step_results: list[dict] = []
 
-    for tool, needed in plan_counts.items():
-        if completed_counts.get(tool, 0) < needed:
-            logger.info("[Agent] done_checker → continue")
-            return "continue"
+    await queue.put(f"data: {json.dumps({'type': 'status', 'value': THINKING_STATUS})}\n\n")
 
-    logger.info("[Agent] done_checker → done")
-    return "done"
+    for _turn in range(MAX_TURNS):
+        started_text = False
 
+        async def on_text(delta: str):
+            nonlocal started_text
+            if not started_text:
+                # first token of a streamed answer — clear the spinner
+                await queue.put(f"data: {json.dumps({'type': 'status', 'value': ''})}\n\n")
+                started_text = True
+            await queue.put(f"data: {json.dumps({'type': 'token', 'value': delta})}\n\n")
 
-# ─────────────────────────────────────────────────────────────────────────────
-# NODE 6 — summarizer
-# Template-based summary — NO extra LLM call. Fast and always works.
-# Streams a concise done message then closes the SSE stream.
-# ─────────────────────────────────────────────────────────────────────────────
+        result = await provider.run(conv, TOOL_SPECS, on_text)
 
+        if not result.tool_calls:
+            break  # final natural-language answer already streamed
 
-async def summarizer_node(state: AgentState) -> dict:
-    queue        = state["queue"]
-    step_results = state["step_results"]
+        # record the assistant's tool-calling turn
+        conv.append({
+            "role": "assistant",
+            "content": result.text,
+            "tool_calls": result.tool_calls,
+        })
 
-    await q_put(queue, f"data: {json.dumps({'type': 'status', 'value': ''})}\n\n")
+        for tc in result.tool_calls:
+            raw = await _execute_tool(
+                tc, queue, session_id, session_dir, user_id, step_results)
+            conv.append({
+                "role": "tool",
+                "tool_call_id": tc.id,
+                "name": tc.name,
+                "content": _result_for_llm(raw),
+            })
 
-    # File utilities feed their results back into the model so the response is
-    # grounded in the actual session file values instead of a generic answer.
-    needs_llm_explanation = any(
-        r.get("file_content") or r.get("files_list")
-        for r in step_results
-    )
-
-    if needs_llm_explanation:
-        context_parts = []
-        for r in step_results:
-            if r.get("file_content"):
-                file_label = r.get("rel_path") or r.get("file_name") or "requested file"
-                truncated_note = "\nNote: content was truncated for chat context." if r.get("truncated") else ""
-                context_parts.append(
-                    f"File: {file_label}\nRead status: {r.get('status')}\nTool message: {r.get('msg', '')}{truncated_note}\n\nContent and extracted values:\n{r['file_content']}"
-                )
-            elif r.get("files_list"):
-                context_parts.append(
-                    "Files in session:\n" + "\n".join(f"- {f}" for f in r["files_list"])
-                )
-
-        if context_parts:
-            original_question = state["messages"][-1]["content"] if state["messages"] else ""
-            context = "\n\n---\n\n".join(context_parts)
-            answer = await ollama_raw(
-                """
-You answer questions about files in a materials-simulation session.
-Use only the supplied file content, extracted table summaries, and file list.
-If the user asks for a numeric value, report the exact value(s) visible in the supplied data and name the column/file when possible.
-If the value is not present, say it is not present in the provided file content.
-Do not invent file values. Do not call tools. Keep the answer concise but include enough detail to be useful.
-""".strip(),
-                f"User question:\n{original_question}\n\nSession file data:\n{context}\n\nAnswer based only on the file data above.",
-            )
-            if answer:
-                await q_put(
-                    queue,
-                    f"data: {json.dumps({'type': 'token', 'value': answer})}\n\n"
-                )
-
+        await queue.put(f"data: {json.dumps({'type': 'status', 'value': THINKING_STATUS})}\n\n")
     else:
-        material_searches = [
-            r for r in step_results
-            if r.get("tool") == "search_materials" and r.get("show_summary", True)
-        ]
-        if material_searches:
-            lines: list[str] = []
-            for r in material_searches:
-                lines.append(r.get("msg") or "Material search completed.")
-                materials = r.get("materials", [])
-                if materials:
-                    lines.append("")
-                    lines.append("| ID | Formula | Source | Gap (eV) | Formation E |")
-                    lines.append("| --- | --- | --- | ---: | ---: |")
-                    for m in materials[:10]:
-                        lines.append(
-                            "| {id} | {formula} | {source} | {gap} | {form} |".format(
-                                id=m.get("id", ""),
-                                formula=m.get("formula", ""),
-                                source=m.get("source", ""),
-                                gap=fmt_material_value(m.get("band_gap_eV")),
-                                form=fmt_material_value(m.get("formation_energy_eV_per_atom")),
-                            )
-                        )
-                    lines.append("")
-                    lines.append("Use one of these IDs if you want me to generate VASP inputs for a specific result.")
-                elif r.get("status") != "success":
-                    lines.append(r.get("msg") or "No matching materials were found.")
-
-            summary_text = "\n".join(lines)
-            await q_put(
-                queue,
-                f"data: {json.dumps({'type': 'token', 'value': summary_text})}\n\n"
-            )
-
-        # simulation tools — show completion summary
-        show_any = any(
-            r.get("show_summary", True) and r.get("tool") != "search_materials"
-            for r in step_results
+        # exhausted MAX_TURNS without a final answer
+        await queue.put(
+            f"data: {json.dumps({'type': 'token', 'value': 'Reached the tool-call limit for this request. Let me know how you would like to proceed.'})}\n\n"
         )
-        if show_any and step_results:
-            lines = ["**Workflow completed.**\n"]
-            for r in step_results:
-                if not r.get("show_summary", True) or r.get("tool") == "search_materials":
-                    continue
-                icon   = "✅" if r["status"] == "success" else "⚠"
-                label  = r.get("label", r["tool"])
-                fcount = len(r.get("files", []))
-                fstr   = f" ({fcount} file{'s' if fcount != 1 else ''} generated)" if fcount else ""
-                lines.append(f"{icon} {label}{fstr}")
 
-            summary = "\n".join(lines)
-            await q_put(
-                queue,
-                f"data: {json.dumps({'type': 'token', 'value': summary})}\n\n"
-            )
-
-    await q_put(queue, f"data: [DONE]\n\n")
-    await q_put(queue, f"data: [SESSION:{state['session_id']}]\n\n")
-    return {}
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Build graph
-# ─────────────────────────────────────────────────────────────────────────────
-
-def build_graph():
-    g = StateGraph(AgentState)
-
-    g.add_node("planner",         planner_node)
-    g.add_node("step_picker",     step_picker_node)
-    g.add_node("tool_executor",   tool_executor_node)
-    g.add_node("result_injector", result_injector_node)
-    g.add_node("summarizer",      summarizer_node)
-
-    g.set_entry_point("planner")
-
-    # planner → step_picker if tools needed, else END
-    # (DONE/SESSION already sent inside planner_node for the no-tools path)
-    g.add_conditional_edges(
-        "planner",
-        lambda s: "step_picker" if s["plan"] else END,
-    )
-
-    g.add_edge("step_picker",     "tool_executor")
-    g.add_edge("tool_executor",   "result_injector")
-
-    g.add_conditional_edges(
-        "result_injector",
-        done_checker_node,
-        {"continue": "step_picker", "done": "summarizer"},
-    )
-
-    g.add_edge("summarizer", END)
-    return g.compile()
-
-
-AGENT_GRAPH = build_graph()
+    await queue.put(f"data: {json.dumps({'type': 'status', 'value': ''})}\n\n")
+    await queue.put("data: [DONE]\n\n")
+    await queue.put(f"data: [SESSION:{session_id}]\n\n")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Public API — called from chat.py token_generator
 # ─────────────────────────────────────────────────────────────────────────────
 
-
 async def run_agent(
-    messages:   list[dict],
+    messages: list[dict],
     session_id: str,
-    user_id:    int | None = None,
+    user_id: int | None = None,
 ) -> AsyncGenerator[str, None]:
     session_dir = str(get_session_dir(session_id))
     queue: asyncio.Queue[str | None] = asyncio.Queue()
 
-    initial_state: AgentState = {
-        "messages":        messages,
-        "session_id":      session_id,
-        "user_id":         user_id,
-        "session_dir":     session_dir,
-        "queue":           queue,
-        "plan":            [],
-        "current_step":    None,
-        "completed_steps": [],
-        "step_results":    [],
-        "error":           None,
-        "_last_result":    None,
-    }
-
-    # Run the graph in a background task so we can drain the queue
-    # concurrently — this is what makes streaming work step-by-step
-    async def _run_graph():
+    async def _run():
         try:
-            await AGENT_GRAPH.ainvoke(initial_state)
-        except Exception as e:
+            await _agent_loop(messages, session_id, user_id, session_dir, queue)
+        except Exception as e:  # noqa: BLE001
             import traceback
             traceback.print_exc()
             await queue.put(
-                f"data: {json.dumps({'type': 'token', 'value': f'⚠ Agent error: {e}'})}\n\n"
-            )
-            await queue.put(f"data: [DONE]\n\n")
+                f"data: {json.dumps({'type': 'token', 'value': f'⚠ Agent error: {e}'})}\n\n")
+            await queue.put("data: [DONE]\n\n")
             await queue.put(f"data: [SESSION:{session_id}]\n\n")
         finally:
-            await queue.put(None)   # sentinel — tells consumer to stop
+            await queue.put(None)  # sentinel
 
-    # Start graph in background — don't await it here
-    graph_task = asyncio.create_task(_run_graph())
-
-    # Drain queue as items arrive — this yields SSE events immediately
-    # as each node puts them, not after the whole graph finishes
+    task = asyncio.create_task(_run())
     try:
         while True:
             item = await queue.get()
@@ -665,10 +336,9 @@ async def run_agent(
                 break
             yield item
     finally:
-        # Make sure the graph task is cleaned up even if client disconnects
-        if not graph_task.done():
-            graph_task.cancel()
+        if not task.done():
+            task.cancel()
             try:
-                await graph_task
+                await task
             except asyncio.CancelledError:
                 pass

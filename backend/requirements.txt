@@ -28,11 +28,11 @@ python-jose[cryptography]
 cryptography
 
 # ── LLM / agent ──────────────────────────────────────────────────────────────
-langgraph
+# Agent uses native function calling: Gemini (hosted default) or Ollama (local).
+google-genai
 ollama
 openai
 anthropic
-google-generativeai
 pydantic_ai
 
 # ── Materials science core ───────────────────────────────────────────────────
