@@ -3,6 +3,7 @@ import Sidebar from './features/sessions/Sidebar'
 import Chat from './features/chat/Chat'
 import RightPanel from './features/sessions/RightPanel'
 import AuthScreen from './features/auth/AuthScreen'
+import Landing from './features/landing/Landing'
 import { fetchMessages, getAuthToken, getMe, getStoredUser, logout } from './api'
 
 export default function App() {
@@ -14,6 +15,8 @@ export default function App() {
   const [user, setUser] = useState(() => getStoredUser())
   const [authChecked, setAuthChecked] = useState(() => !getAuthToken())
   const [authMessage, setAuthMessage] = useState(null)
+  // logged-out view: 'landing' (marketing page) or 'auth' (sign in / sign up)
+  const [authView, setAuthView] = useState('landing')
 
   useEffect(() => {
     if (!getAuthToken()) return
@@ -37,6 +40,7 @@ export default function App() {
       logout()
       setUser(null)
       setAuthChecked(true)
+      setAuthView('auth')
       setAuthMessage(event.detail?.message || 'Session expired. Please log in again.')
       handleNewChat()
     }
@@ -89,12 +93,14 @@ export default function App() {
   function handleAuthenticated(nextUser) {
     setUser(nextUser)
     setAuthMessage(null)
+    setAuthView('landing')
   }
 
   function handleSignOut() {
     logout()
     setUser(null)
     setAuthMessage(null)
+    setAuthView('landing')
     handleNewChat()
   }
 
@@ -103,7 +109,21 @@ export default function App() {
   }
 
   if (!user) {
-    return <AuthScreen onAuthenticated={handleAuthenticated} initialError={authMessage} />
+    if (authView === 'auth') {
+      return (
+        <AuthScreen
+          onAuthenticated={handleAuthenticated}
+          initialError={authMessage}
+          onBack={() => { setAuthMessage(null); setAuthView('landing') }}
+        />
+      )
+    }
+    return (
+      <Landing
+        onGetStarted={() => setAuthView('auth')}
+        onLogin={() => setAuthView('auth')}
+      />
+    )
   }
 
   return (

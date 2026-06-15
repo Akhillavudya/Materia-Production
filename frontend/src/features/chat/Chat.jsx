@@ -4,6 +4,7 @@ import FileCard    from '../files/FileCard'
 import ToolStatus  from './ToolStatus'
 import ApiKeyForm  from './ApiKeyForm'
 import UploadButton from './UploadButton'
+import { LogoMark } from '../../components/Logo'
 
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -404,12 +405,9 @@ export default function Chat({
             maxWidth: '600px', margin: '0 auto',
             padding: '60px 40px 0', textAlign: 'center',
           }}>
-            <div style={{
-              width: '52px', height: '52px', borderRadius: '14px',
-              background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: '24px', margin: '0 auto 20px',
-            }}>⚗</div>
+            <div style={{ width: 'fit-content', margin: '0 auto 20px' }}>
+              <LogoMark size={52} radius={14} />
+            </div>
             <h1 style={{
               fontSize: '22px', fontWeight: '600', color: 'var(--text-primary)',
               marginBottom: '8px', letterSpacing: '-0.02em',
@@ -465,12 +463,9 @@ export default function Chat({
                   <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start', width: '100%' }}>
 
                     {/* avatar */}
-                    <div style={{
-                      width: '28px', height: '28px', borderRadius: '8px',
-                      background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: '14px', flexShrink: 0, marginTop: '2px',
-                    }}>⚗</div>
+                    <span style={{ marginTop: '2px', display: 'inline-flex', flexShrink: 0 }}>
+                      <LogoMark size={28} radius={8} />
+                    </span>
 
                     <div style={{ flex: 1, minWidth: 0 }}>
 

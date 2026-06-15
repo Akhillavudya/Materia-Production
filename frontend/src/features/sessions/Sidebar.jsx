@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { fetchSessions, downloadSessionTxt, downloadSessionJson } from '../../api'
+import { LogoMark } from '../../components/Logo'
 
 export default function Sidebar({ activeSessionId, onSelectSession, onNewChat, user, onSignOut }) {
   const [sessions, setSessions] = useState([])
@@ -68,16 +69,8 @@ export default function Sidebar({ activeSessionId, onSelectSession, onNewChat, u
         alignItems: 'center',
         gap: '10px',
       }}>
-        {/* logo circle */}
-        <div style={{
-          width: '32px', height: '32px',
-          borderRadius: '8px',
-          background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: '16px', flexShrink: 0,
-        }}>
-          ⚗
-        </div>
+        {/* logo mark */}
+        <LogoMark size={32} radius={8} />
         <span style={{
           fontSize: '16px', fontWeight: '600',
           color: 'var(--text-primary)', letterSpacing: '-0.01em',
@@ -266,7 +259,7 @@ export default function Sidebar({ activeSessionId, onSelectSession, onNewChat, u
         {/* avatar */}
         <div style={{
           width: '32px', height: '32px', borderRadius: '50%',
-          background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+          background: 'linear-gradient(135deg, #00b4a6, #0ea5e9)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           fontSize: '13px', fontWeight: '600', color: '#fff', flexShrink: 0,
         }}>

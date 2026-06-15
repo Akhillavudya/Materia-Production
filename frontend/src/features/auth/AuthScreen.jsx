@@ -1,138 +1,55 @@
 import { useEffect, useState } from 'react'
 import { login, signup } from '../../api'
+import Logo from '../../components/Logo'
+import './Auth.css'
 
-const s = {
-  page: {
-    minHeight: '100vh',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    background: 'linear-gradient(135deg, #f8f7f4 0%, #eef2ff 100%)',
-    fontFamily: 'var(--font)',
-    padding: '24px',
-  },
-  card: {
-    width: '100%',
-    maxWidth: '420px',
-    background: '#ffffff',
-    border: '1px solid var(--border)',
-    borderRadius: '20px',
-    boxShadow: '0 20px 60px rgba(15, 23, 42, 0.10)',
-    padding: '28px',
-  },
-  brand: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-    marginBottom: '22px',
-  },
-  logo: {
-    width: '40px',
-    height: '40px',
-    borderRadius: '12px',
-    background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: '20px',
-  },
-  title: {
-    fontSize: '22px',
-    fontWeight: 700,
-    color: 'var(--text-primary)',
-    margin: 0,
-  },
-  subtitle: {
-    fontSize: '13px',
-    color: 'var(--text-muted)',
-    marginTop: '4px',
-  },
-  tabs: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    gap: '8px',
-    padding: '4px',
-    borderRadius: '12px',
-    background: 'var(--hover-bg)',
-    marginBottom: '18px',
-  },
-  tab: (active) => ({
-    border: 'none',
-    borderRadius: '9px',
-    padding: '9px',
-    background: active ? '#ffffff' : 'transparent',
-    color: active ? 'var(--text-primary)' : 'var(--text-muted)',
-    fontWeight: active ? 600 : 500,
-    cursor: 'pointer',
-    boxShadow: active ? '0 1px 6px rgba(15, 23, 42, 0.08)' : 'none',
-  }),
-  label: {
-    display: 'block',
-    fontSize: '12px',
-    fontWeight: 600,
-    color: 'var(--text-secondary)',
-    marginBottom: '6px',
-  },
-  input: {
-    width: '100%',
-    boxSizing: 'border-box',
-    padding: '11px 12px',
-    border: '1px solid var(--border)',
-    borderRadius: '10px',
-    fontSize: '14px',
-    outline: 'none',
-    marginBottom: '14px',
-  },
-  button: (disabled) => ({
-    width: '100%',
-    padding: '12px 14px',
-    border: 'none',
-    borderRadius: '10px',
-    background: disabled ? '#c7d2fe' : '#6366f1',
-    color: '#ffffff',
-    fontSize: '14px',
-    fontWeight: 700,
-    cursor: disabled ? 'not-allowed' : 'pointer',
-  }),
-  error: {
-    marginBottom: '14px',
-    padding: '10px 12px',
-    borderRadius: '10px',
-    background: '#fef2f2',
-    border: '1px solid #fecaca',
-    color: '#b91c1c',
-    fontSize: '13px',
-  },
-  note: {
-    marginTop: '14px',
-    fontSize: '12px',
-    color: 'var(--text-muted)',
-    lineHeight: 1.6,
-  },
+// Real, verifiable product capabilities (no fake stats / testimonials)
+const FEATS = [
+  'Search materials across Materials Project, C2DB & OQMD',
+  'Auto-generate VASP input files from a single sentence',
+  'Run structure optimization & molecular dynamics as background jobs',
+]
+
+function GoogleIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62z" />
+      <path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.81.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.33A9 9 0 0 0 9 18z" />
+      <path fill="#FBBC05" d="M3.97 10.72a5.4 5.4 0 0 1 0-3.44V4.95H.96a9 9 0 0 0 0 8.1l3.01-2.33z" />
+      <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58A9 9 0 0 0 .96 4.95l3.01 2.33C4.68 5.16 6.66 3.58 9 3.58z" />
+    </svg>
+  )
 }
 
-export default function AuthScreen({ onAuthenticated, initialError = null }) {
+export default function AuthScreen({ onAuthenticated, initialError = null, onBack = null }) {
   const [mode, setMode] = useState('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [fullName, setFullName] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(initialError)
+  const [info, setInfo] = useState(null)
 
+  useEffect(() => { setError(initialError) }, [initialError])
 
+  function switchMode(next) {
+    setMode(next)
+    setError(null)
+    setInfo(null)
+  }
 
-  useEffect(() => {
-    setError(initialError)
-  }, [initialError])
-
-
+  function handleGoogle() {
+    // Google OAuth is not wired on the backend yet — be honest, don't fake it.
+    setError(null)
+    setInfo('Google sign-in is coming soon. For now, continue with your email below.')
+  }
 
   async function handleSubmit(e) {
     e.preventDefault()
     if (loading) return
-
     setLoading(true)
     setError(null)
+    setInfo(null)
     try {
       const user = mode === 'signup'
         ? await signup(email.trim(), password, fullName.trim())
@@ -145,72 +62,109 @@ export default function AuthScreen({ onAuthenticated, initialError = null }) {
     }
   }
 
+  const isSignup = mode === 'signup'
+
   return (
-    <div style={s.page}>
-      <form style={s.card} onSubmit={handleSubmit}>
-        <div style={s.brand}>
-          <div style={s.logo}>⚗</div>
-          <div>
-            <h1 style={s.title}>Materia</h1>
-            <div style={s.subtitle}>Sign in to keep sessions, files, and API keys private.</div>
+    <div className="auth">
+      {/* ── left brand panel ── */}
+      <aside className="auth-brand">
+        <div className="auth-brand-top">
+          <Logo size={34} color="#ffffff" />
+        </div>
+
+        <div className="auth-brand-mid">
+          {isSignup ? (
+            <h2>Start your materials<br />research <span className="soft">in minutes.</span></h2>
+          ) : (
+            <h2>The AI that speaks<br />materials science <span className="soft">fluently.</span></h2>
+          )}
+          <p className="auth-brand-sub">
+            Materia turns expert-only computational materials workflows into a simple conversation —
+            discover, simulate, and analyze, all from chat.
+          </p>
+          <ul className="auth-feats">
+            {FEATS.map(f => (
+              <li key={f}><span className="auth-check">✓</span>{f}</li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="auth-brand-foot">Free to start · Powered by Gemini · No setup required</div>
+      </aside>
+
+      {/* ── right form panel ── */}
+      <main className="auth-side">
+        <form className="auth-card" onSubmit={handleSubmit}>
+          {onBack && (
+            <button type="button" className="auth-back" onClick={onBack}>← Back to home</button>
+          )}
+
+          <h1 className="auth-title">{isSignup ? 'Create your account' : 'Welcome back'}</h1>
+          <p className="auth-lede">
+            {isSignup
+              ? 'Set up your Materia account to start running materials research.'
+              : 'Sign in to your Materia account to continue your research.'}
+          </p>
+
+          <button type="button" className="auth-oauth" onClick={handleGoogle}>
+            <GoogleIcon />
+            Continue with Google
+          </button>
+
+          <div className="auth-divider">OR</div>
+
+          {error && <div className="auth-msg auth-msg-error">{error}</div>}
+          {info && <div className="auth-msg auth-msg-info">{info}</div>}
+
+          {isSignup && (
+            <>
+              <label className="auth-label" htmlFor="fullName">Name</label>
+              <input
+                id="fullName"
+                className="auth-input"
+                value={fullName}
+                onChange={e => setFullName(e.target.value)}
+                placeholder="Your name"
+              />
+            </>
+          )}
+
+          <label className="auth-label" htmlFor="email">Email</label>
+          <input
+            id="email"
+            className="auth-input"
+            type="email"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            placeholder="you@lab.edu"
+            required
+          />
+
+          <label className="auth-label" htmlFor="password">Password</label>
+          <input
+            id="password"
+            className="auth-input"
+            type="password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            placeholder={isSignup ? 'At least 8 characters' : 'Your password'}
+            minLength={isSignup ? 8 : 1}
+            required
+          />
+
+          <button className="auth-submit" disabled={loading}>
+            {loading ? 'Please wait…' : isSignup ? 'Create account' : 'Sign in'}
+          </button>
+
+          <div className="auth-switch">
+            {isSignup ? (
+              <>Already have an account? <button type="button" onClick={() => switchMode('login')}>Sign in</button></>
+            ) : (
+              <>New to Materia? <button type="button" onClick={() => switchMode('signup')}>Create one free</button></>
+            )}
           </div>
-        </div>
-
-        <div style={s.tabs}>
-          <button type="button" style={s.tab(mode === 'login')} onClick={() => setMode('login')}>
-            Sign in
-          </button>
-          <button type="button" style={s.tab(mode === 'signup')} onClick={() => setMode('signup')}>
-            Create account
-          </button>
-        </div>
-
-        {error && <div style={s.error}>{error}</div>}
-
-        {mode === 'signup' && (
-          <>
-            <label style={s.label} htmlFor="fullName">Name</label>
-            <input
-              id="fullName"
-              style={s.input}
-              value={fullName}
-              onChange={e => setFullName(e.target.value)}
-              placeholder="Materia User"
-            />
-          </>
-        )}
-
-        <label style={s.label} htmlFor="email">Email</label>
-        <input
-          id="email"
-          style={s.input}
-          type="email"
-          value={email}
-          onChange={e => setEmail(e.target.value)}
-          placeholder="you@lab.edu"
-          required
-        />
-
-        <label style={s.label} htmlFor="password">Password</label>
-        <input
-          id="password"
-          style={s.input}
-          type="password"
-          value={password}
-          onChange={e => setPassword(e.target.value)}
-          placeholder={mode === 'signup' ? 'At least 8 characters' : 'Your password'}
-          minLength={mode === 'signup' ? 8 : 1}
-          required
-        />
-
-        <button style={s.button(loading)} disabled={loading}>
-          {loading ? 'Please wait…' : mode === 'signup' ? 'Create account' : 'Sign in'}
-        </button>
-
-        <div style={s.note}>
-          Seeing <strong>401 Unauthorized</strong> means the backend is protected and the browser needs a login token. Create an account once, then use that account for local development.
-        </div>
-      </form>
+        </form>
+      </main>
     </div>
   )
 }
