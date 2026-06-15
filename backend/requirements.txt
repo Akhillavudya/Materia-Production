@@ -28,7 +28,8 @@ python-jose[cryptography]
 cryptography
 
 # ── LLM / agent ──────────────────────────────────────────────────────────────
-# Agent uses native function calling: Gemini (hosted default) or Ollama (local).
+# Agent uses native function calling: Groq (hosted default) → Gemini → Ollama (local).
+groq
 google-genai
 ollama
 openai

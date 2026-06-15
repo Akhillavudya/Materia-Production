@@ -62,10 +62,14 @@ class Settings(BaseModel):
 
     # ── LLM provider ─────────────────────────────────────────────────────────
     # The agent uses native function-calling (redesign §15). `model_provider`
-    # selects the backend: "gemini" (hosted default), "ollama" (offline/local).
-    # When unset it auto-resolves to "gemini" if a GEMINI_API_KEY is present,
-    # otherwise "ollama".
+    # selects the backend: "groq" (hosted default), "gemini", or "ollama"
+    # (offline/local). When unset it auto-resolves in order of available keys:
+    # groq → gemini → ollama. Whichever is primary falls through the others at
+    # runtime (see agent/llm.py) on quota/429/connection errors.
     model_provider: str | None = None
+    # Groq (free hosted tier — OpenAI-compatible, native tool calling, fast)
+    groq_api_key: str | None = None
+    groq_model: str = "llama-3.3-70b-versatile"
     # Gemini (Google AI Studio free tier — native function calling)
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-2.5-flash"
@@ -78,6 +82,8 @@ class Settings(BaseModel):
         """The effective LLM provider after auto-detection."""
         if self.model_provider:
             return self.model_provider.lower().strip()
+        if self.groq_api_key or os.getenv("GROQ_API_KEY"):
+            return "groq"
         if self.gemini_api_key or os.getenv("GEMINI_API_KEY"):
             return "gemini"
         return "ollama"
@@ -142,6 +148,8 @@ def get_settings() -> Settings:
         vasp_ncore=(int(os.environ["VASP_NCORE"]) if os.getenv("VASP_NCORE") else None),
         pmg_vasp_psp_dir=os.getenv("PMG_VASP_PSP_DIR"),
         model_provider=os.getenv("MODEL_PROVIDER"),
+        groq_api_key=os.getenv("GROQ_API_KEY"),
+        groq_model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
         gemini_api_key=os.getenv("GEMINI_API_KEY"),
         gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
         ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),

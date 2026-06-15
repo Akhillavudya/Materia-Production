@@ -44,21 +44,35 @@ THINKING_STATUS = "🧠 Thinking…"
 
 SYSTEM_PROMPT = """\
 You are Materia AI, an expert computational-materials-science assistant. You help \
-users search materials databases, generate VASP inputs, and run atomistic \
-simulations by calling the tools provided to you.
+users search materials databases, work with their uploaded structures, generate \
+VASP inputs, and run atomistic simulations by calling the tools provided to you.
 
-You have exactly four tools:
+Your tools:
 - search_materials — find materials by formula / element / properties.
-- generate_vasp_inputs — build POSCAR + INCAR + KPOINTS for a material (fast).
+- generate_vasp_inputs — build the FULL VASP input set (POSCAR + INCAR + KPOINTS) (fast).
+- generate_poscar — build ONLY a POSCAR, nothing else (fast).
+- read_file — read/parse a file the user uploaded; for a structure it becomes the \
+active structure for later steps.
+- list_files — list the files in the current session.
+- list_models — list the available ML potentials (MACE, MatterSim) and variants.
 - optimize_structure — relax a session structure with an ML potential (async job).
 - run_md_simulation — run NVT/NPT molecular dynamics (async job).
 
 Rules:
 - When the user names a material by formula (e.g. "MoS2", "NaCl"), call \
 search_materials FIRST, then pass the real `material_id` and `source` from the \
-results to generate_vasp_inputs. Never invent an id.
-- When the user gives a database id directly (e.g. "mp-19306"), you may call \
-generate_vasp_inputs without searching.
+results to generate_vasp_inputs / generate_poscar. Never invent an id.
+- When the user gives a database id directly (e.g. "mp-19306"), you may generate \
+inputs without searching.
+- POSCAR only → generate_poscar. Full VASP input set → generate_vasp_inputs.
+- When the user refers to "this", "the uploaded", or "my" file/structure (or has \
+just uploaded one), call read_file FIRST to load and activate it, then run the \
+requested workflow (optimize_structure, run_md_simulation, generate_vasp_inputs…). \
+Use list_files when the user asks what files/structures exist.
+- Respect a user-named model (e.g. "MatterSim Large", "MACE-MP") by passing \
+calculator_type / calculator_model; afterwards state which model was used. The \
+only supported potentials are MACE and MatterSim — if the user asks for another, \
+say so and offer list_models. Use list_models for "what models can I use".
 - optimize_structure and run_md_simulation operate on a structure already in the \
 session and are long-running: they return a job_id immediately. After calling \
 one, tell the user the job has started and that progress appears in the job \
@@ -212,7 +226,8 @@ async def _execute_tool(
                 "materials", "source_used", "sources_tried", "total_matching",
                 "returned", "formula", "n_sites", "task", "encut", "kmesh",
                 "elements", "files_written", "source", "material_id",
-                "job_id", "type", "track",
+                "job_id", "type", "track", "calculator", "models",
+                "file_type", "source_file", "content_preview",
             ):
                 if key in result:
                     files_payload[key] = result[key]
@@ -255,6 +270,7 @@ async def _agent_loop(
         {"role": m["role"], "content": m.get("content", "")} for m in messages
     ]
     step_results: list[dict] = []
+    produced_text = False
 
     await queue.put(f"data: {json.dumps({'type': 'status', 'value': THINKING_STATUS})}\n\n")
 
@@ -262,16 +278,22 @@ async def _agent_loop(
         started_text = False
 
         async def on_text(delta: str):
-            nonlocal started_text
+            nonlocal started_text, produced_text
             if not started_text:
                 # first token of a streamed answer — clear the spinner
                 await queue.put(f"data: {json.dumps({'type': 'status', 'value': ''})}\n\n")
                 started_text = True
+            produced_text = True
             await queue.put(f"data: {json.dumps({'type': 'token', 'value': delta})}\n\n")
 
         result = await provider.run(conv, TOOL_SPECS, on_text)
 
         if not result.tool_calls:
+            # final answer — guard against an empty bubble if nothing streamed
+            if not produced_text:
+                await queue.put(
+                    f"data: {json.dumps({'type': 'token', 'value': 'I could not generate a response just now. Please try again or rephrase your request.'})}\n\n"
+                )
             break  # final natural-language answer already streamed
 
         # record the assistant's tool-calling turn
@@ -307,6 +329,20 @@ async def _agent_loop(
 # Public API — called from chat.py token_generator
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _friendly_error(e: Exception) -> str:
+    """Map a raw provider/agent error to a short user-facing message.
+
+    Raw provider dumps (e.g. Google's verbose 429 quota JSON) never reach the
+    chat — the full error is logged server-side via the traceback instead.
+    """
+    text = str(e).lower()
+    if any(s in text for s in ("429", "quota", "rate limit", "resource_exhausted",
+                               "too many requests", "unavailable")):
+        return ("⚠ The language model is busy or rate-limited right now, and the "
+                "backup models could not pick up the request. Please try again in a moment.")
+    return "⚠ Something went wrong while generating a response. Please try again."
+
+
 async def run_agent(
     messages: list[dict],
     session_id: str,
@@ -322,7 +358,7 @@ async def run_agent(
             import traceback
             traceback.print_exc()
             await queue.put(
-                f"data: {json.dumps({'type': 'token', 'value': f'⚠ Agent error: {e}'})}\n\n")
+                f"data: {json.dumps({'type': 'token', 'value': _friendly_error(e)})}\n\n")
             await queue.put("data: [DONE]\n\n")
             await queue.put(f"data: [SESSION:{session_id}]\n\n")
         finally:
