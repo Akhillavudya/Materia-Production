@@ -32,34 +32,29 @@ cryptography
 groq
 google-genai
 ollama
-openai
-anthropic
-pydantic_ai
 
 # ── Materials science core ───────────────────────────────────────────────────
 ase
 pymatgen
-pymatgen-analysis-defects
 mp-api
-icet
 
 # ── Machine-learned interatomic potentials ───────────────────────────────────
-chgnet
-mattersim
-sevenn
-orb-models
+# torch is installed CPU-only in the Dockerfile (no CUDA). MACE is the default
+# calculator; MatterSim is the alternative. Both reuse the pre-installed CPU torch.
+# Versions PINNED to the combo proven to work together (matches the dev venv):
+# MACE pins e3nn==0.4.4; MatterSim's metadata over-declares e3nn>=0.5.0 but runs
+# fine on 0.4.4 — so we pin e3nn and install with pip's legacy resolver (Dockerfile).
+mace-torch==0.3.16
+mattersim==1.2.4
+e3nn==0.4.4
 
 # ── Scientific stack ─────────────────────────────────────────────────────────
 numpy
-pandas
-scipy
-scikit-learn
 matplotlib
-seaborn
-optuna
 
-# ── Misc / CLI utilities ─────────────────────────────────────────────────────
+# ── HTTP utilities ───────────────────────────────────────────────────────────
 requests
-colorama
-bullet
-yaspin
+
+# ── NOTE: re-add per upcoming tool (kept out to stay lean) ───────────────────
+# pymatgen-analysis-defects   # when building vacancy/substitution/interstitial tools
+# icet                        # when building SQS generation

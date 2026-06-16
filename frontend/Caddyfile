@@ -1,0 +1,30 @@
+# Materia front door.
+#
+# Local/dev test:   SITE_ADDRESS defaults to :80  → http://localhost
+# Production:       set SITE_ADDRESS=materia.example.com in the environment and Caddy
+#                   automatically obtains & renews a Let's Encrypt HTTPS certificate.
+#
+# (Step 5) To make the whole site lab-only, uncomment the basicauth block below and
+# generate a hash with:  docker run --rm caddy:2-alpine caddy hash-password --plaintext 'yourpass'
+
+{$SITE_ADDRESS} {
+	encode gzip
+
+	# API calls go to the backend service on the compose network.
+	@api path /api/*
+	handle @api {
+		reverse_proxy api:8000
+	}
+
+	# Everything else is the single-page app; unknown paths fall back to index.html.
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+
+	# --- Lab-only front-door password (enable in Step 5) ---
+	# basicauth {
+	#	labuser <bcrypt-hash-here>
+	# }
+}

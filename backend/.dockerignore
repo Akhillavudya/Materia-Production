@@ -1,0 +1,16 @@
+# Keep the image small and safe — never copy these into the build.
+.env
+.env.*
+*.db
+*.sqlite3
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+app/storage/runs/
+# Large model checkpoints are mounted as a read-only volume, never baked in.
+../pre_trained_models/
+.git/
+.gitignore

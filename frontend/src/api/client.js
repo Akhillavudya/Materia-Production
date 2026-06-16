@@ -3,7 +3,9 @@
  * All other api/* modules build on these primitives.
  */
 
-const API = '/api'
+// Same-origin "/api" by default (Caddy proxies it to the backend). The desktop app
+// can point at an absolute backend URL by setting VITE_API_BASE_URL at build time.
+const API = import.meta.env.VITE_API_BASE_URL || '/api'
 const TOKEN_KEY = 'materia_access_token'
 const USER_KEY = 'materia_user'
 

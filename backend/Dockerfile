@@ -1,0 +1,49 @@
+# Materia backend image — used by BOTH the API service and the Celery worker.
+# Built on the server (Oracle ARM64) or locally (amd64); python:3.12-slim is multi-arch.
+FROM python:3.12-slim
+
+# Predictable, quiet Python; no pip cache to keep the image small.
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+# Build/runtime libraries some scientific wheels (pymatgen/ase/mattersim) need.
+# Installed in one layer and the apt lists are removed to stay slim.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        gcc g++ \
+        curl \
+        libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python deps FIRST (own layer) so code edits don't re-download everything.
+COPY requirements.txt .
+# CPU-only PyTorch: the Oracle target is CPU-only (ARM). Installing torch from the CPU
+# wheel index BEFORE the rest means mace-torch/mattersim reuse it instead of pulling
+# ~2.5 GB of unused NVIDIA CUDA libraries (smaller image, faster + more reliable build).
+RUN pip install --upgrade pip \
+    && pip install --retries 5 --timeout 120 \
+        --index-url https://download.pytorch.org/whl/cpu torch \
+    && pip install --retries 5 --timeout 120 \
+        --use-deprecated=legacy-resolver -r requirements.txt
+
+# Now copy the application code.
+COPY . .
+RUN chmod +x docker-entrypoint.sh
+
+# Run as a non-root user (least privilege).
+RUN useradd --create-home --uid 10001 appuser \
+    && chown -R appuser:appuser /app
+USER appuser
+
+EXPOSE 8000
+
+# Simple liveness probe used by docker-compose healthcheck (Step 7 adds /health).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+    CMD curl -fsS http://localhost:8000/ || exit 1
+
+ENTRYPOINT ["./docker-entrypoint.sh"]
+# Default command = API server. The worker service overrides this in docker-compose.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

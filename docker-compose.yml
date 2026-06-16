@@ -1,0 +1,88 @@
+# Materia full stack. Bring it up on the server with:  docker compose up -d --build
+#
+# Operator must provide these in a root .env file (NEVER committed) or the shell:
+#   POSTGRES_PASSWORD        strong DB password
+#   JWT_SECRET_KEY           python -c "import secrets; print(secrets.token_urlsafe(48))"
+#   FIELD_ENCRYPTION_KEY     python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+#   SITE_ADDRESS             your domain (e.g. materia.example.com) for auto-HTTPS; omit for local :80
+#   SITE_URL                 https://your-domain (used for CORS); defaults to http://localhost
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: materia
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: materia
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U materia"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: ./backend
+    restart: unless-stopped
+    environment:
+      ENV: production
+      RUN_MIGRATIONS: "1"          # this service applies alembic migrations on boot
+      DATABASE_URL: postgresql://materia:${POSTGRES_PASSWORD}@postgres:5432/materia
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set JWT_SECRET_KEY}
+      FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:?set FIELD_ENCRYPTION_KEY}
+      ALLOWED_ORIGINS: ${SITE_URL:-http://localhost}
+      PRE_TRAINED_MODELS_DIR: /models
+    volumes:
+      - ./pre_trained_models:/models:ro          # 398 MB checkpoints, read-only
+      - materia_storage:/app/app/storage         # job outputs, shared with worker
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  worker:
+    build: ./backend
+    restart: unless-stopped
+    command: celery -A app.jobs.worker:celery_app worker --loglevel=info --concurrency=1
+    environment:
+      ENV: production
+      DATABASE_URL: postgresql://materia:${POSTGRES_PASSWORD}@postgres:5432/materia
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set JWT_SECRET_KEY}
+      FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:?set FIELD_ENCRYPTION_KEY}
+      PRE_TRAINED_MODELS_DIR: /models
+    volumes:
+      - ./pre_trained_models:/models:ro
+      - materia_storage:/app/app/storage
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  caddy:
+    build: ./frontend
+    restart: unless-stopped
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}         # domain for HTTPS, or :80 locally
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy_data:/data                         # persists the HTTPS certificate
+      - caddy_config:/config
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  materia_storage:
+  caddy_data:
+  caddy_config:
