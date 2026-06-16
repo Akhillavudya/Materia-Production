@@ -59,6 +59,20 @@ def create_job(
         s.commit()
 
 
+def count_active_for_user(user_id: int) -> int:
+    """Number of queued+running jobs a user currently has (for quota checks)."""
+    from sqlalchemy import func, select
+    with _Session() as s:
+        return s.execute(
+            select(func.count())
+            .select_from(Job)
+            .where(
+                Job.user_id == user_id,
+                Job.status.in_([JobStatus.QUEUED.value, JobStatus.RUNNING.value]),
+            )
+        ).scalar_one()
+
+
 def load_job(job_id: str) -> dict | None:
     """Return the spec/type/calculator needed to run a job, or None if missing."""
     with _Session() as s:

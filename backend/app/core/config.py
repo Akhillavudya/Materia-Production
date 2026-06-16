@@ -74,6 +74,15 @@ class Settings(BaseModel):
     job_backend: str = "celery"            # celery | inline (inline = dev/no-broker)
     max_job_wallclock_s: int = 86400       # hard cap before a job is failed
 
+    # ── Compute caps & quotas (Step 4) ───────────────────────────────────────
+    # Protect a small/free server from runaway simulations and job spam. All are
+    # env-overridable so a bigger deployment can raise them.
+    max_opt_steps: int = 5000              # ceiling for an optimization run
+    max_md_steps: int = 50000              # ceiling for MD steps (nsw)
+    max_atoms: int = 512                   # reject structures larger than this
+    max_active_jobs_per_user: int = 3      # queued+running jobs allowed per user
+    max_upload_mb: int = 25                # per-file upload size limit
+
     # ── Storage / compute ────────────────────────────────────────────────────
     # Optional overrides; storage defaults to app/storage/runs (file_service).
     storage_root: str | None = None
@@ -208,6 +217,11 @@ def get_settings() -> Settings:
         redis_url=os.getenv("REDIS_URL", "redis://localhost:6379/0"),
         job_backend=os.getenv("JOB_BACKEND", "celery"),
         max_job_wallclock_s=int(os.getenv("MAX_JOB_WALLCLOCK_S", "86400")),
+        max_opt_steps=int(os.getenv("MAX_OPT_STEPS", "5000")),
+        max_md_steps=int(os.getenv("MAX_MD_STEPS", "50000")),
+        max_atoms=int(os.getenv("MAX_ATOMS", "512")),
+        max_active_jobs_per_user=int(os.getenv("MAX_ACTIVE_JOBS_PER_USER", "3")),
+        max_upload_mb=int(os.getenv("MAX_UPLOAD_MB", "25")),
         storage_root=os.getenv("STORAGE_ROOT"),
         vasp_ncore=(int(os.environ["VASP_NCORE"]) if os.getenv("VASP_NCORE") else None),
         pmg_vasp_psp_dir=os.getenv("PMG_VASP_PSP_DIR"),

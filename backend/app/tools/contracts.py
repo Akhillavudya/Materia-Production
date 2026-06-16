@@ -11,6 +11,8 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
+from app.core.config import settings
+
 # ── 14.1 search_materials ─────────────────────────────────────────────────────
 
 class SearchMaterialsInput(BaseModel):
@@ -66,7 +68,8 @@ class OptimizeStructureInput(BaseModel):
     fmax: float = Field(0.02, description="force convergence threshold [eV/Å]")
     cell_relax: str = Field("none", description='"none" | "shape" | "full"')
     optimizer: str = Field("FIRE", description='"FIRE" | "BFGS" | "LBFGS"')
-    max_steps: int = Field(1000, description="maximum optimizer steps")
+    max_steps: int = Field(1000, ge=1, le=settings.max_opt_steps,
+                           description="maximum optimizer steps")
     calculator_type: str = Field("mace", description=_CALC_TYPE_DESC)
     calculator_model: Optional[str] = Field(None, description=_CALC_MODEL_DESC)
     emit_vasp_inputs: bool = Field(
@@ -80,7 +83,8 @@ class RunMdSimulationInput(BaseModel):
         None, description="input file (auto-detects CONTCAR/POSCAR if omitted)")
     ensemble: str = Field("nvt", description='"nvt" | "npt"')
     temperature: float = Field(300.0, description="target temperature [K]")
-    nsw: int = Field(10000, description="total MD steps")
+    nsw: int = Field(10000, ge=1, le=settings.max_md_steps,
+                     description="total MD steps")
     timestep: float = Field(1.0, description="MD timestep [fs]")
     thermostat: str = Field(
         "langevin", description="langevin|nose-hoover (NVT) or berendsen|bussi (NPT)")

@@ -4,13 +4,14 @@ import json as json_lib
 import os
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent import run_agent
 from app.api.deps import get_session_for_rel_path, get_session_for_user
 from app.core.config import settings
+from app.core.limiter import limiter
 from app.core.logging import get_logger
 from app.core.security import get_current_user
 from app.database.db import AsyncSessionLocal, get_db
@@ -182,20 +183,22 @@ async def export_session_json(
 # ── POST /api/chat ────────────────────────────────────────────────────────────
 
 @router.post("/chat")
+@limiter.limit("30/minute")
 async def chat(
-    request: ChatRequest,
+    request: Request,
+    body: ChatRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     # 1. resolve or create session
-    if request.session_id:
-        session = await get_session_for_user(request.session_id, current_user, db)
+    if body.session_id:
+        session = await get_session_for_user(body.session_id, current_user, db)
     else:
         session = await session_repository.create(
             db,
             session_id=str(uuid.uuid4()),
             user_id=current_user.id,
-            title=request.message[:60].strip(),
+            title=body.message[:60].strip(),
         )
 
     await load_user_keys_into_env(current_user.id, db)
@@ -206,14 +209,14 @@ async def chat(
         db,
         session_id=session.id,
         role="user",
-        content=request.message,
+        content=body.message,
         tool_result=None,
     )
 
     session_id = session.id
     messages_for_llm = (
         [{"role": m.role, "content": m.content} for m in history]
-        + [{"role": "user", "content": request.message}]
+        + [{"role": "user", "content": body.message}]
     )
 
     # 3. streaming generator — powered by the LangGraph agent

@@ -18,6 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from app.core.config import settings
 from app.core.context import get_session_id, get_user_id
 from app.core.logging import get_logger
 from app.domain.jobs import JobType
@@ -67,6 +68,18 @@ def _enqueue_job(
     if not user_id or not session_id:
         return {"status": "error",
                 "message": "No authenticated session — cannot start a job."}
+
+    # Per-user concurrency quota — protects the shared server from job spam.
+    active = store.count_active_for_user(user_id)
+    if active >= settings.max_active_jobs_per_user:
+        return {
+            "status": "error",
+            "message": (
+                f"You already have {active} job(s) running or queued "
+                f"(limit {settings.max_active_jobs_per_user}). "
+                "Wait for one to finish before starting another."
+            ),
+        }
 
     output_dir.mkdir(parents=True, exist_ok=True)
     spec = {
@@ -246,6 +259,29 @@ def _resolve_structure(
         return structure
 
     raise _StructureError("Provide either material_id (+ source) or poscar_path.")
+
+
+def _enforce_atom_cap(poscar_path: Path) -> Optional[dict]:
+    """Reject structures larger than the server's atom limit before enqueueing.
+
+    Returns an error envelope if too large, else None. If the file can't be
+    parsed here, returns None and lets the worker surface the real error.
+    """
+    try:
+        from pymatgen.core import Structure
+        n_atoms = len(Structure.from_file(str(poscar_path)))
+    except Exception:  # noqa: BLE001
+        return None
+    if n_atoms > settings.max_atoms:
+        return {
+            "status": "error",
+            "message": (
+                f"This structure has {n_atoms} atoms, above the "
+                f"{settings.max_atoms}-atom limit on this server. "
+                "Use a smaller cell or unit cell."
+            ),
+        }
+    return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -626,12 +662,16 @@ def optimize_structure(
         optimizer = "FIRE"  # BFGS does not support cell DOF
 
     fmax      = max(float(fmax), 0.001)
-    max_steps = max(int(max_steps), 1)
+    max_steps = min(max(int(max_steps), 1), settings.max_opt_steps)
 
     try:
         poscar_path = find_structure_in_session(poscar_name, prefer_contcar=False)
     except FileNotFoundError as e:
         return {"status": "error", "message": str(e)}
+
+    too_big = _enforce_atom_cap(poscar_path)
+    if too_big:
+        return too_big
 
     calc_cfg = _resolve_calculator(calculator_type, calculator_model)
     if calc_cfg.get("status") == "error":
@@ -681,7 +721,7 @@ def run_md_simulation(
     thermostat = thermostat.lower().strip() or ("langevin" if ensemble == "nvt" else "berendsen")
 
     temperature   = max(float(temperature), 1.0)
-    nsw           = max(int(nsw), 1)
+    nsw           = min(max(int(nsw), 1), settings.max_md_steps)
     timestep      = max(float(timestep), 0.1)
     log_interval  = max(int(log_interval), 1)
 
@@ -689,6 +729,10 @@ def run_md_simulation(
         poscar_path = find_structure_in_session(poscar_name, prefer_contcar=True)
     except FileNotFoundError as e:
         return {"status": "error", "message": str(e)}
+
+    too_big = _enforce_atom_cap(poscar_path)
+    if too_big:
+        return too_big
 
     calc_cfg = _resolve_calculator(calculator_type, calculator_model)
     if calc_cfg.get("status") == "error":

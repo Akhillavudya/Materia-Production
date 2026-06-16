@@ -3,10 +3,12 @@
 import uuid
 from typing import List
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_session_for_user
+from app.core.config import settings
+from app.core.limiter import limiter
 from app.core.security import get_current_user
 from app.database.db import get_db
 from app.database.models import User
@@ -21,9 +23,17 @@ from app.services.storage.file_service import (
 
 router = APIRouter()
 
+_MAX_UPLOAD_BYTES = settings.max_upload_mb * 1024 * 1024
+
+
+def _too_large(content: bytes) -> bool:
+    return len(content) > _MAX_UPLOAD_BYTES
+
 
 @router.post("/sessions/{session_id}/upload", response_model=list[UploadedFileOut])
+@limiter.limit("30/minute")
 async def upload_files(
+    request: Request,
     session_id: str,
     files: List[UploadFile] = File(...),
     current_user: User = Depends(get_current_user),
@@ -47,6 +57,9 @@ async def upload_files(
         dest = upload_dir / safe_name
         try:
             content = await file.read()
+            if _too_large(content):
+                errors.append(f"{original_name}: exceeds {settings.max_upload_mb} MB limit")
+                continue
             dest.write_bytes(content)
             uploaded.append(UploadedFileOut(
                 name=safe_name,
@@ -66,7 +79,9 @@ async def upload_files(
 
 
 @router.post("/sessions/create-and-upload")
+@limiter.limit("30/minute")
 async def create_session_and_upload(
+    request: Request,
     files: List[UploadFile] = File(...),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -89,6 +104,8 @@ async def create_session_and_upload(
             continue
         dest = upload_dir / safe_name
         content = await file.read()
+        if _too_large(content):
+            continue
         dest.write_bytes(content)
         uploaded.append({
             "name": safe_name,
