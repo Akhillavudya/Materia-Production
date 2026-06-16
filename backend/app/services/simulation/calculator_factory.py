@@ -22,6 +22,7 @@ that sits at PRE_TRAINED_MODELS_DIR (env var) or the default below.
 """
 
 import os
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -52,6 +53,54 @@ _MACE_MODEL_PATHS: dict[str, str] = {
 _MATTERSIM_MODEL_PATHS: dict[str, str] = {
     "mattersim-v1.0.0-1M": "matterSim_models/mattersim-v1.0.0-1M",
     "mattersim-v1.0.0-5M": "matterSim_models/mattersim-v1.0.0-5M",
+}
+
+# Supported calculator types and their default model.
+SUPPORTED_CALCULATORS: dict[str, str] = {
+    "mace":      DEFAULT_MACE_MODEL,
+    "mattersim": DEFAULT_MATTERSIM_MODEL,
+}
+
+# ── Natural-language aliases → (calculator type, concrete model) ─────────────
+# Single source of truth shared by `normalize_calculator` (routing) and
+# `list_models` (discovery), so what we advertise is exactly what we accept.
+# Keys are matched case-insensitively against a whitespace/underscore-normalised
+# form of the user/LLM-supplied string.
+MODEL_ALIASES: dict[str, tuple[str, str]] = {
+    # MACE
+    "mace":                     ("mace", "mace-mp-0b3-medium"),
+    "mace mp":                  ("mace", "mace-mp-0b3-medium"),
+    "mace-mp":                  ("mace", "mace-mp-0b3-medium"),
+    "mace mp 0b3":              ("mace", "mace-mp-0b3-medium"),
+    "mace-mp-0b3-medium":       ("mace", "mace-mp-0b3-medium"),
+    "mace mpa":                 ("mace", "mace-mpa-0-medium"),
+    "mace-mpa":                 ("mace", "mace-mpa-0-medium"),
+    "mace-mpa-0-medium":        ("mace", "mace-mpa-0-medium"),
+    "mace omat":                ("mace", "mace-omat-0-medium"),
+    "mace-omat":                ("mace", "mace-omat-0-medium"),
+    "mace-omat-0-medium":       ("mace", "mace-omat-0-medium"),
+    "mace matpes":              ("mace", "MACE-matpes-pbe-omat-ft"),
+    "mace-matpes":              ("mace", "MACE-matpes-pbe-omat-ft"),
+    "mace-matpes-pbe-omat-ft":  ("mace", "MACE-matpes-pbe-omat-ft"),
+    # MatterSim
+    "mattersim":                ("mattersim", "mattersim-v1.0.0-1M"),
+    "mattersim small":          ("mattersim", "mattersim-v1.0.0-1M"),
+    "mattersim 1m":             ("mattersim", "mattersim-v1.0.0-1M"),
+    "mattersim-v1.0.0-1m":      ("mattersim", "mattersim-v1.0.0-1M"),
+    "mattersim large":          ("mattersim", "mattersim-v1.0.0-5M"),
+    "mattersim big":            ("mattersim", "mattersim-v1.0.0-5M"),
+    "mattersim 5m":             ("mattersim", "mattersim-v1.0.0-5M"),
+    "mattersim-v1.0.0-5m":      ("mattersim", "mattersim-v1.0.0-5M"),
+}
+
+# Human-friendly alias hints surfaced by list_models, keyed by concrete model name.
+MODEL_ALIAS_HINTS: dict[str, list[str]] = {
+    "mace-mp-0b3-medium":      ["mace", "mace-mp"],
+    "mace-mpa-0-medium":       ["mace-mpa"],
+    "mace-omat-0-medium":      ["mace-omat"],
+    "MACE-matpes-pbe-omat-ft": ["mace-matpes"],
+    "mattersim-v1.0.0-1M":     ["mattersim", "mattersim small", "1m"],
+    "mattersim-v1.0.0-5M":     ["mattersim large", "5m"],
 }
 
 
@@ -119,6 +168,72 @@ def list_available_models() -> dict:
         result["mattersim"].append({"name": name, "exists": p.exists(), "path": str(p)})
 
     return result
+
+
+def _norm_key(s: str) -> str:
+    """Collapse whitespace/underscores and lowercase for alias matching."""
+    return re.sub(r"[\s_]+", " ", str(s).strip().lower())
+
+
+# Per-type known model names (for validating an explicit model string).
+_MODELS_BY_TYPE: dict[str, dict[str, str]] = {
+    "mace":      _MACE_MODEL_PATHS,
+    "mattersim": _MATTERSIM_MODEL_PATHS,
+}
+
+
+def normalize_calculator(
+    calc_type: Optional[str] = None,
+    model: Optional[str] = None,
+) -> dict:
+    """Resolve a (type, model) request into a concrete calculator config.
+
+    Tolerant of natural-language model names ("MatterSim Large", "MACE-MP") and
+    always fills a concrete default model so the selection can be surfaced.
+
+    Returns one of:
+      - ``{"type": <type>, "model": <model>}`` on success, or
+      - ``{"unsupported": True, "requested": <str>, "supported": [...]}`` when the
+        requested calculator type is not MACE/MatterSim (caller turns this into a
+        friendly message instead of enqueueing a doomed job).
+    """
+    ctype = (calc_type or "mace").strip()
+    ctype_norm = _norm_key(ctype)
+
+    # 1. Try alias lookups, most specific first.
+    candidates: list[str] = []
+    if model:
+        candidates.append(_norm_key(model))
+        candidates.append(_norm_key(f"{ctype} {model}"))
+    candidates.append(ctype_norm)
+    for key in candidates:
+        hit = MODEL_ALIASES.get(key)
+        if hit:
+            return {"type": hit[0], "model": hit[1]}
+
+    # 2. Known base type with an explicit (or missing) model name.
+    base = ctype_norm
+    if base not in SUPPORTED_CALCULATORS:
+        # maybe the type itself is a model name like "mattersim-v1.0.0-5M"
+        for t, paths in _MODELS_BY_TYPE.items():
+            if ctype in paths:
+                base = t
+                model = model or ctype
+                break
+
+    if base in SUPPORTED_CALCULATORS:
+        known = _MODELS_BY_TYPE[base]
+        if model and model in known:
+            return {"type": base, "model": model}
+        # Unknown/blank model for a supported type → fall back to its default.
+        return {"type": base, "model": SUPPORTED_CALCULATORS[base]}
+
+    # 3. Unsupported calculator type.
+    return {
+        "unsupported": True,
+        "requested": calc_type,
+        "supported": list(SUPPORTED_CALCULATORS.keys()),
+    }
 
 
 # ── Private builders ──────────────────────────────────────────────────────────

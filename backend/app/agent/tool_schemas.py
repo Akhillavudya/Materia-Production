@@ -14,8 +14,12 @@ from pydantic import BaseModel
 
 from app.agent.providers.base import ToolSpec
 from app.tools.contracts import (
+    GeneratePoscarInput,
     GenerateVaspInputsInput,
+    ListFilesInput,
+    ListModelsInput,
     OptimizeStructureInput,
+    ReadFileInput,
     RunMdSimulationInput,
     SearchMaterialsInput,
 )
@@ -33,6 +37,30 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
         "material. Provide a material_id (and source) from a prior search, or a "
         "poscar_path for an existing session structure. Fast/synchronous."
     ),
+    "generate_poscar": (
+        "Generate ONLY a POSCAR structure file (no INCAR/KPOINTS/POTCAR). Use this "
+        "when the user asks just for a POSCAR. Provide a material_id (and source) "
+        "from a prior search, or a poscar_path to convert an existing session "
+        "structure. Use generate_vasp_inputs instead for the full input set."
+    ),
+    "read_file": (
+        "Read and parse a file the user uploaded into this session. Structure "
+        "files (POSCAR/CONTCAR/CIF/XYZ) are parsed and made the active structure "
+        "so you can then optimize, run MD, or generate VASP inputs from them; "
+        "text/config files (INCAR/KPOINTS/CSV/JSON) are returned as a preview. "
+        "Call this first when the user refers to 'this'/'the uploaded' file. Omit "
+        "filename to read the most recent upload."
+    ),
+    "list_files": (
+        "List all files in the current session (name, type, upload time, short "
+        "description). Use when the user asks what files or structures are "
+        "available."
+    ),
+    "list_models": (
+        "List the available machine-learned potential models (MACE and MatterSim) "
+        "and their variants, including which is the default. Use when the user "
+        "asks what models they can use, or to validate a requested model."
+    ),
     "optimize_structure": (
         "Run an ASE geometry optimization (relaxation) on a structure already in "
         "the session, using a machine-learned potential (MACE/MatterSim). This is "
@@ -49,6 +77,10 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
 _TOOL_MODELS: list[tuple[str, type[BaseModel]]] = [
     ("search_materials", SearchMaterialsInput),
     ("generate_vasp_inputs", GenerateVaspInputsInput),
+    ("generate_poscar", GeneratePoscarInput),
+    ("read_file", ReadFileInput),
+    ("list_files", ListFilesInput),
+    ("list_models", ListModelsInput),
     ("optimize_structure", OptimizeStructureInput),
     ("run_md_simulation", RunMdSimulationInput),
 ]

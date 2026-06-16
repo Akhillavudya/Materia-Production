@@ -46,6 +46,20 @@ class GenerateVaspInputsInput(BaseModel):
 
 # ── 14.3 optimize_structure ───────────────────────────────────────────────────
 
+# Shared, model-facing help for the ML-potential selection args (used by both
+# optimize_structure and run_md_simulation). Mirrors calculator_factory.
+_CALC_TYPE_DESC = (
+    'ML potential family: "mace" or "mattersim" (default "mace"). '
+    'Accepts natural names like "MACE-MP" or "MatterSim Large".'
+)
+_CALC_MODEL_DESC = (
+    "specific model/variant; omit for the family default. "
+    "MACE: mace-mp-0b3-medium (default), mace-mpa-0-medium, mace-omat-0-medium, "
+    "MACE-matpes-pbe-omat-ft. MatterSim: mattersim-v1.0.0-1M (default, 'small'), "
+    "mattersim-v1.0.0-5M ('large'). Use list_models to discover what is available."
+)
+
+
 class OptimizeStructureInput(BaseModel):
     poscar_name: Optional[str] = Field(
         None, description="input file (auto-detects POSCAR if omitted)")
@@ -53,9 +67,8 @@ class OptimizeStructureInput(BaseModel):
     cell_relax: str = Field("none", description='"none" | "shape" | "full"')
     optimizer: str = Field("FIRE", description='"FIRE" | "BFGS" | "LBFGS"')
     max_steps: int = Field(1000, description="maximum optimizer steps")
-    calculator_type: str = Field("mace", description='"mace" | "mattersim"')
-    calculator_model: Optional[str] = Field(
-        None, description="override default model name")
+    calculator_type: str = Field("mace", description=_CALC_TYPE_DESC)
+    calculator_model: Optional[str] = Field(None, description=_CALC_MODEL_DESC)
     emit_vasp_inputs: bool = Field(
         True, description="also write INCAR + KPOINTS for VASP handoff")
 
@@ -72,12 +85,42 @@ class RunMdSimulationInput(BaseModel):
     thermostat: str = Field(
         "langevin", description="langevin|nose-hoover (NVT) or berendsen|bussi (NPT)")
     pressure: float = Field(0.0, description="target pressure [GPa], NPT only")
-    calculator_type: str = Field("mace", description='"mace" | "mattersim"')
-    calculator_model: Optional[str] = Field(
-        None, description="override default model name")
+    calculator_type: str = Field("mace", description=_CALC_TYPE_DESC)
+    calculator_model: Optional[str] = Field(None, description=_CALC_MODEL_DESC)
     log_interval: int = Field(10, description="log every N steps")
     emit_vasp_inputs: bool = Field(
         True, description="also write INCAR + KPOINTS for VASP-MD handoff")
+
+
+# ── 14.5 generate_poscar ──────────────────────────────────────────────────────
+
+class GeneratePoscarInput(BaseModel):
+    material_id: Optional[str] = Field(
+        None, description='id from search_materials, e.g. "mp-19306" (with source)')
+    source: Optional[str] = Field(
+        None, description='"mp" | "c2db" | "oqmd" (paired with material_id)')
+    poscar_path: Optional[str] = Field(
+        None, description="existing session structure file to convert to a POSCAR")
+
+
+# ── 14.6 read_file ────────────────────────────────────────────────────────────
+
+class ReadFileInput(BaseModel):
+    filename: Optional[str] = Field(
+        None,
+        description="file to read; omit to auto-pick the most recent uploaded file")
+
+
+# ── 14.7 list_files ───────────────────────────────────────────────────────────
+
+class ListFilesInput(BaseModel):
+    """No arguments — lists every file in the current session."""
+
+
+# ── 14.8 list_models ──────────────────────────────────────────────────────────
+
+class ListModelsInput(BaseModel):
+    """No arguments — lists the available ML-potential models."""
 
 
 def args_and_desc(model: type[BaseModel]) -> tuple[list[str], str]:

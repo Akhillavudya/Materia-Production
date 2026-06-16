@@ -7,8 +7,12 @@ the executor never drift from the actual tool signatures.
 
 from app.tools import material_tools
 from app.tools.contracts import (
+    GeneratePoscarInput,
     GenerateVaspInputsInput,
+    ListFilesInput,
+    ListModelsInput,
     OptimizeStructureInput,
+    ReadFileInput,
     RunMdSimulationInput,
     SearchMaterialsInput,
     args_and_desc,
@@ -18,6 +22,10 @@ from app.tools.contracts import (
 _TOOL_SPECS = [
     ("search_materials",     "Searching material databases", SearchMaterialsInput),
     ("generate_vasp_inputs", "Generating VASP inputs",       GenerateVaspInputsInput),
+    ("generate_poscar",      "Generating POSCAR",            GeneratePoscarInput),
+    ("read_file",            "Reading file",                 ReadFileInput),
+    ("list_files",           "Listing session files",        ListFilesInput),
+    ("list_models",          "Listing models",               ListModelsInput),
     ("optimize_structure",   "Optimizing structure",         OptimizeStructureInput),
     ("run_md_simulation",    "Running MD simulation",         RunMdSimulationInput),
 ]

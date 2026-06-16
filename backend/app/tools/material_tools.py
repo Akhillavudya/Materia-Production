@@ -14,6 +14,7 @@ HTTP, no SQL here.
 import hashlib
 import json
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -24,12 +25,24 @@ from app.domain.vasp import CellRelax, VaspTask
 from app.jobs import store
 from app.jobs.queue import enqueue
 from app.services.search import MaterialQuery, search_service
+from app.services.simulation.calculator_factory import (
+    DEFAULT_MACE_MODEL,
+    DEFAULT_MATTERSIM_MODEL,
+    MODEL_ALIAS_HINTS,
+    list_available_models,
+    normalize_calculator,
+)
 from app.services.storage.file_service import (
+    STORAGE_ROOT,
     find_structure_in_session,
+    get_session_dir,
+    list_session_files,
     rel_to_storage,
+    safe_file_in_session,
     session_dir,
     session_path,
 )
+from app.services.vasp.poscar import write_poscar
 from app.services.vasp.service import vasp_service
 
 logger = get_logger(__name__)
@@ -89,6 +102,31 @@ def _enqueue_job(
             "Live progress and results will appear in the job dashboard."
         ),
     }
+
+
+def _calc_label(cfg: dict) -> str:
+    """Human-friendly name for a resolved calculator config, e.g. 'MACE (…)'."""
+    fam = {"mace": "MACE", "mattersim": "MatterSim"}.get(cfg.get("type"), cfg.get("type"))
+    return f"{fam} ({cfg.get('model')})"
+
+
+def _resolve_calculator(calc_type: Optional[str], model: Optional[str]) -> dict:
+    """Resolve a calculator request to a concrete cfg, or an error envelope.
+
+    Returns ``{"type", "model"}`` on success or ``{"status": "error", ...}`` when
+    the requested potential is unsupported (so the caller skips enqueueing).
+    """
+    cfg = normalize_calculator(calc_type, model)
+    if cfg.get("unsupported"):
+        return {
+            "status": "error",
+            "message": (
+                f"Calculator '{cfg['requested']}' is not supported. "
+                f"Available potentials: {', '.join(cfg['supported'])}. "
+                "Use list_models to see the variants."
+            ),
+        }
+    return cfg
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -171,6 +209,46 @@ def search_materials(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Shared structure resolution (used by generate_vasp_inputs + generate_poscar)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _StructureError(Exception):
+    """Raised when an input structure can't be resolved (user-facing message)."""
+
+
+def _resolve_structure(
+    material_id: Optional[str],
+    source:      Optional[str],
+    poscar_path: Optional[str],
+):
+    """Resolve a pymatgen ``Structure`` from a session file or a database id.
+
+    Raises ``_StructureError`` with a friendly message on any failure.
+    """
+    try:
+        from pymatgen.core import Structure
+    except ImportError:
+        raise _StructureError("pymatgen is required. Run: pip install pymatgen")
+
+    if poscar_path and not material_id:
+        try:
+            path = find_structure_in_session(poscar_path)
+            return Structure.from_file(str(path))
+        except Exception as e:  # noqa: BLE001
+            raise _StructureError(f"Could not read structure: {e}")
+
+    if material_id:
+        if material_id in (None, "", "auto"):
+            raise _StructureError("No material selected. Search for a material first.")
+        structure = search_service.get_structure(material_id, source)
+        if structure is None:
+            raise _StructureError(f"Could not retrieve a structure for '{material_id}'.")
+        return structure
+
+    raise _StructureError("Provide either material_id (+ source) or poscar_path.")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # TOOL — generate_vasp_inputs  (consolidates POSCAR + KPOINTS + INCAR generation)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -200,28 +278,9 @@ def generate_vasp_inputs(
 
     # ── resolve the input structure ───────────────────────────────────────────
     try:
-        from pymatgen.core import Structure
-    except ImportError:
-        return {"status": "error", "message": "pymatgen is required. Run: pip install pymatgen"}
-
-    structure = None
-    if poscar_path and not material_id:
-        try:
-            path = find_structure_in_session(poscar_path)
-            structure = Structure.from_file(str(path))
-        except Exception as e:
-            return {"status": "error", "message": f"Could not read structure: {e}"}
-    elif material_id:
-        if material_id in (None, "", "auto"):
-            return {"status": "error",
-                    "message": "No material selected. Search for a material first."}
-        structure = search_service.get_structure(material_id, source)
-        if structure is None:
-            return {"status": "error",
-                    "message": f"Could not retrieve a structure for '{material_id}'."}
-    else:
-        return {"status": "error",
-                "message": "Provide either material_id (+ source) or poscar_path."}
+        structure = _resolve_structure(material_id, source, poscar_path)
+    except _StructureError as e:
+        return {"status": "error", "message": str(e)}
 
     # ── build the input set ────────────────────────────────────────────────────
     out_dir = session_dir() / "vasp_inputs" / task_enum.value
@@ -251,6 +310,287 @@ def generate_vasp_inputs(
         "message": (
             f"VASP {task_enum.value} inputs generated for {input_set.formula} "
             f"({input_set.n_sites} atoms): {', '.join(written)}."
+        ),
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TOOL — generate_poscar  (POSCAR only — no INCAR/KPOINTS/POTCAR)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def generate_poscar(
+    material_id: Optional[str] = None,
+    source:      Optional[str] = None,
+    poscar_path: Optional[str] = None,
+) -> dict:
+    """Generate ONLY a POSCAR for a material or session structure.
+
+    Writes ``POSCAR`` + ``POSCAR_<formula>`` into the session root so downstream
+    tools (optimize / MD / VASP) pick it up. Does not create INCAR, KPOINTS, or
+    POTCAR — use generate_vasp_inputs for the full VASP input set.
+    """
+    try:
+        structure = _resolve_structure(material_id, source, poscar_path)
+    except _StructureError as e:
+        return {"status": "error", "message": str(e)}
+
+    formula = structure.composition.reduced_formula
+    try:
+        result = write_poscar(structure, session_dir(), name=formula)
+    except Exception as e:  # noqa: BLE001
+        return {"status": "error", "message": f"POSCAR generation failed: {e}"}
+
+    return {
+        "status":        "success",
+        "formula":       result["formula"],
+        "n_sites":       result["n_sites"],
+        "lattice_a":     result["lattice_a"],
+        "lattice_b":     result["lattice_b"],
+        "lattice_c":     result["lattice_c"],
+        "files_written": result["files_written"],
+        "message": (
+            f"POSCAR generated for {result['formula']} "
+            f"({result['n_sites']} atoms). No other VASP inputs were created."
+        ),
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# File-classification helper (shared by read_file + list_files)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_STRUCTURE_EXTS = {".cif", ".xyz", ".vasp"}
+_MAX_PREVIEW_CHARS = 4000
+
+
+def _classify_file(path: Path) -> str:
+    """Return a short human-readable type label for a session file."""
+    name = path.name
+    upper = name.upper()
+    suffix = path.suffix.lower()
+
+    if upper.startswith("POSCAR") or suffix == ".vasp":
+        return "Crystal structure (POSCAR)"
+    if upper.startswith("CONTCAR"):
+        return "Relaxed structure (CONTCAR)"
+    if suffix == ".cif":
+        return "CIF structure"
+    if suffix == ".xyz":
+        return "XYZ structure"
+    if upper == "INCAR":
+        return "VASP INCAR (settings)"
+    if upper == "KPOINTS":
+        return "VASP KPOINTS (k-mesh)"
+    if upper.startswith("POTCAR"):
+        return "VASP POTCAR (pseudopotential)"
+    if upper in ("OUTCAR", "OSZICAR", "XDATCAR"):
+        return f"VASP output ({name})"
+    if "trajectory" in name.lower() or suffix == ".traj":
+        return "Trajectory (MD/optimization)"
+    if suffix == ".csv":
+        return "Data table (CSV)"
+    if suffix == ".json":
+        return "JSON data"
+    if suffix == ".log":
+        return "Log file"
+    if suffix == ".png":
+        return "Plot image"
+    return "File"
+
+
+def _is_structure_file(path: Path) -> bool:
+    upper = path.name.upper()
+    return (
+        upper.startswith(("POSCAR", "CONTCAR"))
+        or path.suffix.lower() in _STRUCTURE_EXTS
+    )
+
+
+def _parse_structure(path: Path):
+    """Parse a structure file with pymatgen, falling back to ASE for XYZ/etc."""
+    try:
+        from pymatgen.core import Structure
+    except ImportError:
+        raise _StructureError("pymatgen is required. Run: pip install pymatgen")
+
+    try:
+        return Structure.from_file(str(path))
+    except Exception:  # noqa: BLE001 — try ASE before giving up
+        pass
+
+    try:
+        from ase.io import read as ase_read
+        from pymatgen.io.ase import AseAtomsAdaptor
+        atoms = ase_read(str(path))
+        return AseAtomsAdaptor.get_structure(atoms)
+    except Exception as e:  # noqa: BLE001
+        raise _StructureError(
+            f"Could not parse a crystal structure from '{path.name}': {e}. "
+            "A periodic cell is required (XYZ files without a lattice are not supported)."
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TOOL — read_file
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _newest_upload() -> Optional[Path]:
+    """Return the most-recently-modified file under the session's uploads/ folder."""
+    up = session_path() / "uploads"
+    if not up.exists():
+        return None
+    files = sorted(
+        [p for p in up.rglob("*") if p.is_file()],
+        key=lambda p: p.stat().st_mtime, reverse=True,
+    )
+    return files[0] if files else None
+
+
+def read_file(filename: Optional[str] = None) -> dict:
+    """Read and parse a file in the current session.
+
+    Structure files (POSCAR/CONTCAR/CIF/XYZ/.vasp) are parsed and *activated*: a
+    canonical POSCAR is written into the session root so optimize / MD / VASP
+    tools operate on them. Text/config files (INCAR/KPOINTS/CSV/JSON/…) are
+    returned as a trimmed preview. Omit `filename` to read the latest upload.
+    """
+    if filename:
+        try:
+            path = safe_file_in_session(filename)
+        except (FileNotFoundError, PermissionError) as e:
+            return {"status": "error", "message": str(e)}
+    else:
+        path = _newest_upload()
+        if path is None:
+            try:
+                path = safe_file_in_session("auto")
+            except FileNotFoundError as e:
+                return {"status": "error", "message": str(e)}
+
+    if _is_structure_file(path):
+        return _read_structure_file(path)
+    return _read_text_file(path)
+
+
+def _read_structure_file(path: Path) -> dict:
+    try:
+        structure = _parse_structure(path)
+    except _StructureError as e:
+        return {"status": "error", "message": str(e)}
+
+    formula = structure.composition.reduced_formula
+    try:
+        write_poscar(structure, session_dir(), name=formula)
+    except Exception as e:  # noqa: BLE001
+        return {"status": "error", "message": f"Could not activate structure: {e}"}
+
+    return {
+        "status":        "success",
+        "file_type":     "structure",
+        "source_file":   path.name,
+        "formula":       formula,
+        "n_sites":       len(structure),
+        "lattice_a":     round(structure.lattice.a, 4),
+        "lattice_b":     round(structure.lattice.b, 4),
+        "lattice_c":     round(structure.lattice.c, 4),
+        "elements":      [str(e) for e in structure.composition.elements],
+        "files_written": ["POSCAR", f"POSCAR_{formula}"],
+        "message": (
+            f"Read {path.name}: {formula} ({len(structure)} atoms). Wrote POSCAR — "
+            "this structure is now active for optimization, MD, or VASP inputs."
+        ),
+    }
+
+
+def _read_text_file(path: Path) -> dict:
+    try:
+        text = path.read_text(errors="replace")
+    except Exception as e:  # noqa: BLE001
+        return {"status": "error", "message": f"Could not read '{path.name}': {e}"}
+
+    truncated = len(text) > _MAX_PREVIEW_CHARS
+    preview = text[:_MAX_PREVIEW_CHARS] + ("\n…(truncated)" if truncated else "")
+    return {
+        "status":          "success",
+        "file_type":       _classify_file(path),
+        "source_file":     path.name,
+        "n_lines":         text.count("\n") + 1,
+        "size_kb":         round(path.stat().st_size / 1024, 2),
+        "truncated":       truncated,
+        "content_preview": preview,
+        "message":         f"Read {path.name} ({_classify_file(path)}).",
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TOOL — list_files
+# ─────────────────────────────────────────────────────────────────────────────
+
+def list_files() -> dict:
+    """List every file in the current session with type, time and description."""
+    session_id = get_session_id()
+    if not session_id:
+        return {"status": "error", "message": "No active session yet.", "files": []}
+
+    files = []
+    for entry in list_session_files(session_id):
+        rel = entry["rel_path"]
+        abs_path = STORAGE_ROOT / rel
+        uploaded = "uploads" in Path(rel).parts
+        label = _classify_file(abs_path)
+        try:
+            when = datetime.fromtimestamp(
+                abs_path.stat().st_mtime).isoformat(timespec="seconds")
+        except OSError:
+            when = None
+        files.append({
+            "name":        entry["name"],
+            "type":        label,
+            "uploaded":    uploaded,
+            "time":        when,
+            "size_kb":     entry["size_kb"],
+            "rel_path":    rel,
+            "description": label + (" — uploaded by user" if uploaded else ""),
+        })
+
+    if not files:
+        return {"status": "ok", "files": [], "message": "No files in this session yet."}
+    return {
+        "status":  "ok",
+        "files":   files,
+        "message": f"{len(files)} file(s) in this session.",
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TOOL — list_models
+# ─────────────────────────────────────────────────────────────────────────────
+
+def list_models() -> dict:
+    """List the available ML-potential models (MACE / MatterSim) with variants."""
+    available = list_available_models()
+    defaults = {"mace": DEFAULT_MACE_MODEL, "mattersim": DEFAULT_MATTERSIM_MODEL}
+
+    models = []
+    for ctype, entries in available.items():
+        for e in entries:
+            models.append({
+                "calculator": ctype,
+                "name":       e["name"],
+                "is_default": e["name"] == defaults.get(ctype),
+                "available":  e["exists"],
+                "aliases":    MODEL_ALIAS_HINTS.get(e["name"], []),
+            })
+
+    n_mace = len(available.get("mace", []))
+    n_ms = len(available.get("mattersim", []))
+    return {
+        "status":              "ok",
+        "default_calculator":  "mace",
+        "models":              models,
+        "message": (
+            f"2 potentials available: MACE ({n_mace} variants) and "
+            f"MatterSim ({n_ms} variants)."
         ),
     }
 
@@ -293,11 +633,11 @@ def optimize_structure(
     except FileNotFoundError as e:
         return {"status": "error", "message": str(e)}
 
-    calc_cfg: dict = {"type": calculator_type.lower()}
-    if calculator_model:
-        calc_cfg["model"] = calculator_model
+    calc_cfg = _resolve_calculator(calculator_type, calculator_model)
+    if calc_cfg.get("status") == "error":
+        return calc_cfg
 
-    return _enqueue_job(
+    result = _enqueue_job(
         JobType.OPTIMIZE,
         poscar_path=poscar_path,
         output_dir=session_path() / "optimization",
@@ -306,6 +646,10 @@ def optimize_structure(
         calculator=calc_cfg,
         emit_vasp_inputs=emit_vasp_inputs,
     )
+    if result.get("status") == "queued":
+        result["calculator"] = calc_cfg
+        result["message"] = f"{result['message']} Using {_calc_label(calc_cfg)}."
+    return result
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -346,11 +690,11 @@ def run_md_simulation(
     except FileNotFoundError as e:
         return {"status": "error", "message": str(e)}
 
-    calc_cfg: dict = {"type": calculator_type.lower()}
-    if calculator_model:
-        calc_cfg["model"] = calculator_model
+    calc_cfg = _resolve_calculator(calculator_type, calculator_model)
+    if calc_cfg.get("status") == "error":
+        return calc_cfg
 
-    return _enqueue_job(
+    result = _enqueue_job(
         JobType.MD,
         poscar_path=poscar_path,
         output_dir=session_path() / "md_simulation",
@@ -360,3 +704,7 @@ def run_md_simulation(
         calculator=calc_cfg,
         emit_vasp_inputs=emit_vasp_inputs,
     )
+    if result.get("status") == "queued":
+        result["calculator"] = calc_cfg
+        result["message"] = f"{result['message']} Using {_calc_label(calc_cfg)}."
+    return result
