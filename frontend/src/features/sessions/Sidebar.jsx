@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react'
 import { fetchSessions, downloadSessionTxt, downloadSessionJson } from '../../api'
 import { LogoMark } from '../../components/Logo'
 
-export default function Sidebar({ activeSessionId, onSelectSession, onNewChat, user, onSignOut }) {
+export default function Sidebar({ activeSessionId, onSelectSession, onNewChat, user, onSignOut, onOpenSettings }) {
   const [sessions, setSessions] = useState([])
   const [openMenu, setOpenMenu] = useState(null)
   const [now, setNow] = useState(null)
@@ -273,7 +273,22 @@ export default function Sidebar({ activeSessionId, onSelectSession, onNewChat, u
             {user?.email}
           </div>
         </div>
-        {/* settings icon */}
+        {/* settings (API keys) */}
+        <button style={{
+          background: 'none', border: 'none',
+          color: 'var(--text-muted)', cursor: 'pointer',
+          fontSize: '16px', padding: '4px', borderRadius: '6px',
+          transition: 'background 0.1s',
+          flexShrink: 0,
+        }}
+        onMouseEnter={e => e.currentTarget.style.background = 'var(--hover-bg)'}
+        onMouseLeave={e => e.currentTarget.style.background = 'none'}
+        title="Settings — API keys"
+        onClick={onOpenSettings}
+        >
+          ⚙️
+        </button>
+        {/* sign out */}
         <button style={{
           background: 'none', border: 'none',
           color: 'var(--text-muted)', cursor: 'pointer',

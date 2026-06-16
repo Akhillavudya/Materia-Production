@@ -4,6 +4,7 @@ import Chat from './features/chat/Chat'
 import RightPanel from './features/sessions/RightPanel'
 import AuthScreen from './features/auth/AuthScreen'
 import Landing from './features/landing/Landing'
+import SettingsPanel from './features/settings/SettingsPanel'
 import { fetchMessages, getAuthToken, getMe, getStoredUser, logout } from './api'
 
 export default function App() {
@@ -17,6 +18,7 @@ export default function App() {
   const [authMessage, setAuthMessage] = useState(null)
   // logged-out view: 'landing' (marketing page) or 'auth' (sign in / sign up)
   const [authView, setAuthView] = useState('landing')
+  const [showSettings, setShowSettings] = useState(false)
 
   useEffect(() => {
     if (!getAuthToken()) return
@@ -139,6 +141,7 @@ export default function App() {
         onNewChat={handleNewChat}
         user={user}
         onSignOut={handleSignOut}
+        onOpenSettings={() => setShowSettings(true)}
       />
 
       <Chat
@@ -157,6 +160,10 @@ export default function App() {
         jobRefresh={jobRefresh}
         onRerun={handleRerun}
       />
+
+      {showSettings && (
+        <SettingsPanel onClose={() => setShowSettings(false)} />
+      )}
     </div>
   )
 }

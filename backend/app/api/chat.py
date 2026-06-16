@@ -1,6 +1,7 @@
 """Chat, session, and file-serving endpoints."""
 
 import json as json_lib
+import os
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -9,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent import run_agent
 from app.api.deps import get_session_for_rel_path, get_session_for_user
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.security import get_current_user
 from app.database.db import AsyncSessionLocal, get_db
@@ -218,6 +220,22 @@ async def chat(
     async def token_generator():
         full_response: list[str] = []
         all_tool_results: list[dict] = []
+
+        # BYOK gate: in a hosted deployment the user must supply their own LLM key.
+        # If none is set, prompt for one (friendly text + inline key form) instead of
+        # letting the agent fail the whole turn with a generic "something went wrong".
+        if settings.is_production and not (
+            os.getenv("GROQ_API_KEY") or os.getenv("GEMINI_API_KEY")
+        ):
+            nudge = (
+                "I don't have an LLM API key yet. Add your free Groq or Gemini key in "
+                "Settings (or below) to start chatting."
+            )
+            yield f"data: [SESSION:{session_id}]\n\n"
+            yield f'data: {json_lib.dumps({"type": "token", "value": nudge})}\n\n'
+            yield "data: [NEED_API_KEY:groq]\n\n"
+            yield "data: [DONE]\n\n"
+            return
 
         async for sse in run_agent(messages_for_llm, session_id, user_id=current_user.id):
             yield sse

@@ -20,6 +20,16 @@ async def list_for_user(db: AsyncSession, user_id: int) -> Sequence[ApiKey]:
     return result.scalars().all()
 
 
+async def delete(db: AsyncSession, *, user_id: int, service: str) -> bool:
+    """Remove a user's key for `service`. Returns True if a row was deleted."""
+    existing = await get(db, user_id=user_id, service=service)
+    if existing is None:
+        return False
+    await db.delete(existing)
+    await db.commit()
+    return True
+
+
 async def upsert(
     db: AsyncSession,
     *,

@@ -122,6 +122,35 @@ your laptop. Build the container now so every future tool is verified where stud
 
 ---
 
+### Step 2.5 — BYOK Key Management (make the app actually usable)
+**Purpose:** Give users a real **Settings** place to paste/manage their own LLM (Groq/Gemini)
+and Materials Project keys, and wire the backend so those keys are actually loaded and a
+missing key produces a friendly prompt instead of "something went wrong."
+
+**Analogy:** The car's key wiring exists under the dash, but there's **no ignition slot** exposed
+— and one wire (Groq) isn't even connected. This step connects the wire and mounts a visible
+ignition + key drawer.
+
+**Why before the new tools (and before Step 3 here):** Without it **no one — not even your lab —
+can use the chatbot**, because BYOK has nowhere to enter the key. Discovered live: signup works,
+but a search returns "something went wrong" since the agent has no LLM key and there's no UI to
+add one.
+
+**📁 Files that change & why:**
+- `services/key_service.py` — add `"groq"` to `KEY_ENV_MAP` (Groq is the *primary* provider but
+  was never wired — pasted Groq keys were stored yet never loaded). 🐞
+- `api/keys.py` + `repositories/api_key_repository.py` — add **list** (`GET /keys`) and **delete**
+  (`DELETE /keys/{service}`) so a settings panel can show/remove keys.
+- `api/chat.py` — when no LLM key is configured (production), emit `[NEED_API_KEY:groq]` + a clear
+  message instead of a generic failure.
+- `frontend/src/features/settings/SettingsPanel.jsx` *(new)* + a "⚙️ Settings" entry in
+  `features/sessions/Sidebar.jsx` — the visible key drawer (Groq / Gemini / Materials Project).
+- `frontend/src/api/keys.js` — add `listKeys()` / `deleteKey()`.
+- `frontend/src/features/chat/ApiKeyForm.jsx` — add friendly `groq`/`gemini` entries (today it
+  only knows `mp`).
+
+---
+
 ### Step 3 — Real database (PostgreSQL), no silent fallback
 **Purpose:** Use Postgres in production and **stop the app from silently falling back to SQLite**.
 
