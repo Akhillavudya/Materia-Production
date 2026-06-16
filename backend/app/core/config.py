@@ -9,6 +9,7 @@ injected into `os.environ` at request time by `services.key_service`.
 import os
 from functools import lru_cache
 
+from cryptography.fernet import Fernet
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
@@ -19,11 +20,35 @@ def _split_origins(raw: str) -> list[str]:
     return [origin.strip() for origin in raw.split(",") if origin.strip()]
 
 
+# Secrets that must never be used in production — placeholders / known defaults.
+_WEAK_SECRETS = {"", "my-super-secret-key", "change-me-to-a-long-random-secret",
+                 "changeme", "secret", "dev", "test"}
+
+
+def _is_strong_secret(value: str | None) -> bool:
+    """A login secret is acceptable only if it is non-default and long enough."""
+    return bool(value) and value not in _WEAK_SECRETS and len(value) >= 32
+
+
+def _valid_fernet(value: str | None) -> bool:
+    """True when `value` is a usable Fernet key (encrypts BYOK keys at rest)."""
+    if not value:
+        return False
+    try:
+        Fernet(value.encode())
+        return True
+    except Exception:
+        return False
+
+
 class Settings(BaseModel):
     """Immutable, validated view of the runtime environment."""
 
     # ── Application ──────────────────────────────────────────────────────────
     app_name: str = "Materia Production Backend"
+    # Deployment environment. "production"/"prod" turns on fail-fast secret checks
+    # (see `get_settings`). Anything else (default) keeps local dev frictionless.
+    env: str = "development"
 
     # ── Auth / security ──────────────────────────────────────────────────────
     jwt_secret_key: str | None = None
@@ -106,6 +131,10 @@ class Settings(BaseModel):
     def is_postgres(self) -> bool:
         return bool(self.database_url_env) and "postgres" in self.database_url_env
 
+    @property
+    def is_production(self) -> bool:
+        return self.env.lower().strip() in {"production", "prod"}
+
 
 def _as_async_url(raw: str) -> str:
     """Normalise a DSN to an async driver (postgresql+asyncpg / sqlite+aiosqlite)."""
@@ -128,10 +157,35 @@ def _as_sync_url(raw: str) -> str:
     return raw.replace("+asyncpg", "").replace("+aiosqlite", "")
 
 
+def _validate_production(s: "Settings") -> None:
+    """Refuse to run in production with weak/missing secrets (fail-fast).
+
+    Only enforced when ENV=production, so local dev and tests are unaffected.
+    """
+    problems: list[str] = []
+    if not _is_strong_secret(s.jwt_secret_key):
+        problems.append(
+            "JWT_SECRET_KEY is missing, a known placeholder, or shorter than 32 chars. "
+            'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(48))"'
+        )
+    if not _valid_fernet(s.field_encryption_key):
+        problems.append(
+            "FIELD_ENCRYPTION_KEY is missing or not a valid Fernet key, so user API keys "
+            "would be stored UNENCRYPTED. Generate one with: "
+            'python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
+        )
+    if problems:
+        raise RuntimeError(
+            "Refusing to start in production (ENV=production):\n  - "
+            + "\n  - ".join(problems)
+        )
+
+
 @lru_cache
 def get_settings() -> Settings:
     """Return the cached `Settings` instance built from the environment."""
-    return Settings(
+    s = Settings(
+        env=os.getenv("ENV", "development"),
         jwt_secret_key=os.getenv("JWT_SECRET_KEY"),
         jwt_algorithm=os.getenv("JWT_ALGORITHM", "HS256"),
         access_token_expire_minutes=int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440")),
@@ -155,6 +209,9 @@ def get_settings() -> Settings:
         ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
         ollama_model=os.getenv("OLLAMA_MODEL", "qwen3:14b"),
     )
+    if s.is_production:
+        _validate_production(s)
+    return s
 
 
 settings = get_settings()

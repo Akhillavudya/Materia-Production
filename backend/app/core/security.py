@@ -1,3 +1,5 @@
+import logging
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -12,7 +14,18 @@ from app.database.db import get_db
 from app.database.models import User
 from app.repositories import user_repository
 
+logger = logging.getLogger(__name__)
+
+# In production a missing/weak JWT secret is already rejected at startup by
+# config._validate_production. This dev-only fallback lets the app boot without a
+# configured key; tokens then won't survive a process restart (acceptable for dev).
 SECRET_KEY = settings.jwt_secret_key
+if not SECRET_KEY:
+    SECRET_KEY = secrets.token_urlsafe(48)
+    logger.warning(
+        "JWT_SECRET_KEY is not set — using a process-ephemeral key (dev only). "
+        "Logins will be invalidated on restart. Set JWT_SECRET_KEY for stable sessions."
+    )
 ALGORITHM = settings.jwt_algorithm
 ACCESS_TOKEN_EXPIRE_MINUTES = settings.access_token_expire_minutes
 
