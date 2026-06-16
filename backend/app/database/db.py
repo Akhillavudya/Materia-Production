@@ -10,7 +10,18 @@ DATABASE_URL = settings.database_url
 
 # echo=False means SQLAlchemy won't print every SQL query to the terminal
 # change to echo=True temporarily if you want to debug what's being stored
-engine = create_async_engine(DATABASE_URL, echo=False)
+_engine_kwargs: dict = {"echo": False}
+if settings.is_postgres:
+    # Keep pooled connections healthy across idle periods / DB restarts:
+    #   pool_pre_ping  — test a connection before use, transparently replace dead ones
+    #   pool_recycle   — drop connections older than 30 min (avoids server-side timeouts)
+    _engine_kwargs.update(
+        pool_pre_ping=True,
+        pool_recycle=1800,
+        pool_size=5,
+        max_overflow=10,
+    )
+engine = create_async_engine(DATABASE_URL, **_engine_kwargs)
 
 AsyncSessionLocal = sessionmaker(
     bind=engine,

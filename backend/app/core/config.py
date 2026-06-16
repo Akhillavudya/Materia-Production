@@ -174,6 +174,16 @@ def _validate_production(s: "Settings") -> None:
             "would be stored UNENCRYPTED. Generate one with: "
             'python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
         )
+    if not s.database_url_env:
+        problems.append(
+            "DATABASE_URL is not set. Production requires PostgreSQL — the SQLite fallback is "
+            "unsafe with separate api + worker processes. Set DATABASE_URL=postgresql://..."
+        )
+    elif not s.is_postgres:
+        problems.append(
+            "DATABASE_URL must point to PostgreSQL in production (SQLite is single-writer and "
+            "corrupts under the concurrent api + worker access)."
+        )
     if problems:
         raise RuntimeError(
             "Refusing to start in production (ENV=production):\n  - "

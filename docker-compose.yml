@@ -53,6 +53,14 @@ services:
     build: ./backend
     restart: unless-stopped
     command: celery -A app.jobs.worker:celery_app worker --loglevel=info --concurrency=1
+    # The image's default HTTP healthcheck doesn't apply to a Celery worker (no web
+    # server). Use Celery's own ping instead so the worker reports real health.
+    healthcheck:
+      test: ["CMD", "celery", "-A", "app.jobs.worker:celery_app", "inspect", "ping", "-d", "celery@$$HOSTNAME"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     environment:
       ENV: production
       DATABASE_URL: postgresql://materia:${POSTGRES_PASSWORD}@postgres:5432/materia
