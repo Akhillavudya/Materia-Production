@@ -20,6 +20,11 @@ def _split_origins(raw: str) -> list[str]:
     return [origin.strip() for origin in raw.split(",") if origin.strip()]
 
 
+def _split_csv(raw: str) -> list[str]:
+    """Split a comma-separated env value into a clean list (case preserved)."""
+    return [item.strip() for item in (raw or "").split(",") if item.strip()]
+
+
 # Secrets that must never be used in production — placeholders / known defaults.
 _WEAK_SECRETS = {"", "my-super-secret-key", "change-me-to-a-long-random-secret",
                  "changeme", "secret", "dev", "test"}
@@ -55,6 +60,16 @@ class Settings(BaseModel):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 1440
     field_encryption_key: str = ""
+
+    # ── Signup gating (Step 5 — invite-only lab access) ──────────────────────
+    # signup_mode: "open"   — anyone may register (dev default)
+    #              "invite" — registration requires a code from `invite_codes`
+    #              "closed" — registration disabled entirely (admin-created only)
+    # In production the mode defaults to "invite" (see `get_settings`) so a public
+    # URL is never accidentally open. `invite_codes` is a list of accepted codes
+    # (one shared, or one-per-student so individuals can be revoked).
+    signup_mode: str = "open"
+    invite_codes: list[str] = Field(default_factory=list)
 
     # ── CORS ─────────────────────────────────────────────────────────────────
     allowed_origins: list[str] = Field(
@@ -193,6 +208,15 @@ def _validate_production(s: "Settings") -> None:
             "DATABASE_URL must point to PostgreSQL in production (SQLite is single-writer and "
             "corrupts under the concurrent api + worker access)."
         )
+    if s.signup_mode not in {"open", "invite", "closed"}:
+        problems.append(
+            f"SIGNUP_MODE='{s.signup_mode}' is invalid. Use 'open', 'invite', or 'closed'."
+        )
+    if s.signup_mode == "invite" and not s.invite_codes:
+        problems.append(
+            "SIGNUP_MODE=invite but INVITE_CODES is empty — nobody could register. Set "
+            "INVITE_CODES=code1,code2 (share with your lab), or use SIGNUP_MODE=closed."
+        )
     if problems:
         raise RuntimeError(
             "Refusing to start in production (ENV=production):\n  - "
@@ -203,8 +227,16 @@ def _validate_production(s: "Settings") -> None:
 @lru_cache
 def get_settings() -> Settings:
     """Return the cached `Settings` instance built from the environment."""
+    env = os.getenv("ENV", "development")
+    is_prod = env.lower().strip() in {"production", "prod"}
+    # Default to invite-only in production so a public URL is never open by accident;
+    # dev stays "open" for frictionless local testing. Either is overridable via env.
+    signup_mode = (os.getenv("SIGNUP_MODE") or ("invite" if is_prod else "open")).lower().strip()
+
     s = Settings(
-        env=os.getenv("ENV", "development"),
+        env=env,
+        signup_mode=signup_mode,
+        invite_codes=_split_csv(os.getenv("INVITE_CODES", "")),
         jwt_secret_key=os.getenv("JWT_SECRET_KEY"),
         jwt_algorithm=os.getenv("JWT_ALGORITHM", "HS256"),
         access_token_expire_minutes=int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440")),

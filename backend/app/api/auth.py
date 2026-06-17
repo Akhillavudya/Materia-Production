@@ -1,8 +1,11 @@
 """Authentication endpoints (signup, login, me)."""
 
+import secrets
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.limiter import limiter
 from app.core.security import (
     create_access_token,
@@ -20,6 +23,30 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 def _normalize_email(email: str) -> str:
     return email.strip().lower()
+
+
+def _invite_code_ok(code: str | None) -> bool:
+    """Constant-time match of a submitted code against the configured codes."""
+    if not code:
+        return False
+    code = code.strip()
+    # compare against every configured code so timing doesn't leak which matched
+    return any(secrets.compare_digest(code, valid) for valid in settings.invite_codes)
+
+
+def _enforce_signup_allowed(invite_code: str | None) -> None:
+    """Apply the SIGNUP_MODE gate (Step 5). Raises HTTPException when blocked."""
+    mode = settings.signup_mode
+    if mode == "closed":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Signups are disabled. Contact the administrator for an account.",
+        )
+    if mode == "invite" and not _invite_code_ok(invite_code):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="A valid invite code is required to sign up.",
+        )
 
 
 def _user_out(user: User) -> UserOut:
@@ -42,6 +69,8 @@ def _token_response(user: User) -> TokenResponse:
 @router.post("/signup", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 @limiter.limit("10/minute")
 async def signup(request: Request, body: SignupRequest, db: AsyncSession = Depends(get_db)):
+    _enforce_signup_allowed(body.invite_code)
+
     email = _normalize_email(body.email)
     if not email or "@" not in email:
         raise HTTPException(status_code=400, detail="A valid email is required")
@@ -74,6 +103,15 @@ async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends
         raise HTTPException(status_code=403, detail="User account is disabled")
 
     return _token_response(user)
+
+
+@router.get("/config")
+async def auth_config():
+    """Public, unauthenticated hint so the signup UI can adapt to the gate.
+
+    Returns only the mode — never the invite codes themselves.
+    """
+    return {"signup_mode": settings.signup_mode}
 
 
 @router.get("/me", response_model=UserOut)

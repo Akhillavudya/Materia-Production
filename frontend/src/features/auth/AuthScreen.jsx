@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { login, signup } from '../../api'
+import { getAuthConfig, login, signup } from '../../api'
 import Logo from '../../components/Logo'
 import './Auth.css'
 
@@ -26,11 +26,18 @@ export default function AuthScreen({ onAuthenticated, initialError = null, onBac
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [fullName, setFullName] = useState('')
+  const [inviteCode, setInviteCode] = useState('')
+  const [signupMode, setSignupMode] = useState('open')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(initialError)
   const [info, setInfo] = useState(null)
 
   useEffect(() => { setError(initialError) }, [initialError])
+
+  // Ask the backend how signup is gated so we show the right fields.
+  useEffect(() => {
+    getAuthConfig().then(c => setSignupMode(c?.signup_mode || 'open')).catch(() => {})
+  }, [])
 
   function switchMode(next) {
     setMode(next)
@@ -52,7 +59,7 @@ export default function AuthScreen({ onAuthenticated, initialError = null, onBac
     setInfo(null)
     try {
       const user = mode === 'signup'
-        ? await signup(email.trim(), password, fullName.trim())
+        ? await signup(email.trim(), password, fullName.trim(), inviteCode.trim())
         : await login(email.trim(), password)
       onAuthenticated(user)
     } catch (err) {
@@ -147,10 +154,24 @@ export default function AuthScreen({ onAuthenticated, initialError = null, onBac
             type="password"
             value={password}
             onChange={e => setPassword(e.target.value)}
-            placeholder={isSignup ? 'At least 8 characters' : 'Your password'}
-            minLength={isSignup ? 8 : 1}
+            placeholder={isSignup ? 'At least 12 characters' : 'Your password'}
+            minLength={isSignup ? 12 : 1}
             required
           />
+
+          {isSignup && signupMode === 'invite' && (
+            <>
+              <label className="auth-label" htmlFor="inviteCode">Invite code</label>
+              <input
+                id="inviteCode"
+                className="auth-input"
+                value={inviteCode}
+                onChange={e => setInviteCode(e.target.value)}
+                placeholder="Code from your lab admin"
+                required
+              />
+            </>
+          )}
 
           <button className="auth-submit" disabled={loading}>
             {loading ? 'Please wait…' : isSignup ? 'Create account' : 'Sign in'}
@@ -159,8 +180,12 @@ export default function AuthScreen({ onAuthenticated, initialError = null, onBac
           <div className="auth-switch">
             {isSignup ? (
               <>Already have an account? <button type="button" onClick={() => switchMode('login')}>Sign in</button></>
+            ) : signupMode === 'closed' ? (
+              <span className="auth-switch-muted">Accounts are created by your lab admin.</span>
             ) : (
-              <>New to Materia? <button type="button" onClick={() => switchMode('signup')}>Create one free</button></>
+              <>New to Materia? <button type="button" onClick={() => switchMode('signup')}>
+                {signupMode === 'invite' ? 'Register with an invite code' : 'Create one free'}
+              </button></>
             )}
           </div>
         </form>

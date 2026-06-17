@@ -7,6 +7,8 @@ class SignupRequest(BaseModel):
     email: str = Field(..., min_length=3, max_length=255)
     password: str = Field(..., min_length=12, max_length=128)
     full_name: str | None = Field(default=None, max_length=255)
+    # Required only when the server runs in SIGNUP_MODE=invite (Step 5).
+    invite_code: str | None = Field(default=None, max_length=128)
 
 
 class LoginRequest(BaseModel):

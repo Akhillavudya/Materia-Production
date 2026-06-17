@@ -6,14 +6,26 @@ import { authRequest, readError, setAuthSession } from './client'
 
 const API = '/api'
 
-export async function signup(email, password, fullName = '') {
+export async function signup(email, password, fullName = '', inviteCode = '') {
   const res = await fetch(`${API}/auth/signup`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password, full_name: fullName }),
+    body: JSON.stringify({ email, password, full_name: fullName, invite_code: inviteCode }),
   })
   if (!res.ok) throw new Error(await readError(res, 'Could not create account'))
   return setAuthSession(await res.json())
+}
+
+// Public hint for the signup UI: { signup_mode: 'open' | 'invite' | 'closed' }.
+// Falls back to 'open' so the form still works if the call fails.
+export async function getAuthConfig() {
+  try {
+    const res = await fetch(`${API}/auth/config`)
+    if (!res.ok) return { signup_mode: 'open' }
+    return await res.json()
+  } catch {
+    return { signup_mode: 'open' }
+  }
 }
 
 export async function login(email, password) {
