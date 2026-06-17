@@ -700,7 +700,7 @@ def run_md_simulation(
     poscar_name:      Optional[str] = None,
     ensemble:         str           = "nvt",
     temperature:      float         = 300.0,
-    nsw:              int           = 10000,
+    nsw:              int           = 2000,
     timestep:         float         = 1.0,
     thermostat:       str           = "langevin",
     pressure:         float         = 0.0,

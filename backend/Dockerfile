@@ -20,12 +20,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install Python deps FIRST (own layer) so code edits don't re-download everything.
 COPY requirements.txt .
-# CPU-only PyTorch: the Oracle target is CPU-only (ARM). Installing torch from the CPU
-# wheel index BEFORE the rest means mace-torch/mattersim reuse it instead of pulling
-# ~2.5 GB of unused NVIDIA CUDA libraries (smaller image, faster + more reliable build).
+# CPU-only PyTorch: the Oracle target is CPU-only (ARM). Install the whole torch family
+# (torch + torchvision + torchaudio) together from the CPU wheel index BEFORE the rest.
+# Why all three: mattersim pulls in torchvision, and a torchvision built against a
+# different torch ABI fails at runtime with "operator torchvision::nms does not exist".
+# Installing them together guarantees matching +cpu builds, and means mace-torch/mattersim
+# reuse them instead of pulling ~2.5 GB of unused NVIDIA CUDA libraries.
 RUN pip install --upgrade pip \
     && pip install --retries 5 --timeout 120 \
-        --index-url https://download.pytorch.org/whl/cpu torch \
+        --index-url https://download.pytorch.org/whl/cpu \
+        torch torchvision torchaudio \
     && pip install --retries 5 --timeout 120 \
         --use-deprecated=legacy-resolver -r requirements.txt
 

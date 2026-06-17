@@ -10,6 +10,7 @@ control of tool execution and SSE emission.
 from __future__ import annotations
 
 import json
+import os
 import uuid
 
 from groq import AsyncGroq
@@ -88,7 +89,10 @@ class GroqProvider(LLMProvider):
         tools: list[ToolSpec],
         on_text: OnText,
     ) -> LLMResult:
-        key = settings.groq_api_key
+        # Read os.environ FIRST so a per-request BYOK key (injected by
+        # key_service.load_user_keys_into_env) is honoured; fall back to the
+        # boot-time settings value. Mirrors the gemini provider.
+        key = os.getenv("GROQ_API_KEY") or settings.groq_api_key
         if not key:
             raise RuntimeError(
                 "GROQ_API_KEY is not set. Add a Groq key (free at "

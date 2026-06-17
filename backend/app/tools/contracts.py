@@ -83,8 +83,10 @@ class RunMdSimulationInput(BaseModel):
         None, description="input file (auto-detects CONTCAR/POSCAR if omitted)")
     ensemble: str = Field("nvt", description='"nvt" | "npt"')
     temperature: float = Field(300.0, description="target temperature [K]")
-    nsw: int = Field(10000, ge=1, le=settings.max_md_steps,
-                     description="total MD steps")
+    nsw: int = Field(2000, ge=1, le=settings.max_md_steps,
+                     description="total MD steps (CPU-bound: each step is one "
+                                 "force eval, ~hundreds of ms; only go above a "
+                                 "few thousand when the user explicitly asks)")
     timestep: float = Field(1.0, description="MD timestep [fs]")
     thermostat: str = Field(
         "langevin", description="langevin|nose-hoover (NVT) or berendsen|bussi (NPT)")

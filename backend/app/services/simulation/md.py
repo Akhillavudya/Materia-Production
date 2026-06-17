@@ -30,7 +30,7 @@ Usage
         output_dir  = "/path/to/session_dir",
         ensemble    = "nvt",
         temperature = 300,
-        nsw         = 10000,
+        nsw         = 2000,
         timestep    = 1.0,
         thermostat  = "langevin",
         calculator  = {"type": "mace"},
@@ -55,7 +55,7 @@ def run_md(
     output_dir:           str,
     ensemble:             str           = "nvt",
     temperature:          float         = 300.0,
-    nsw:                  int           = 10000,
+    nsw:                  int           = 2000,
     timestep:             float         = 1.0,
     thermostat:           str           = "langevin",
     pressure:             float         = 0.0,        # GPa, NPT only
@@ -74,7 +74,7 @@ def run_md(
     output_dir           : Output directory.
     ensemble             : "nvt" | "npt"
     temperature          : Target temperature [K]. Default 300.
-    nsw                  : Total MD steps. Default 10000.
+    nsw                  : Total MD steps. Default 2000.
     timestep             : Timestep [fs]. Default 1.0.
     thermostat           : NVT: "langevin" | "nose-hoover"
                            NPT: "berendsen" | "bussi"

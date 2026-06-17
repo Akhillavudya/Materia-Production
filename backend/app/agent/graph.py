@@ -77,6 +77,15 @@ say so and offer list_models. Use list_models for "what models can I use".
 session and are long-running: they return a job_id immediately. After calling \
 one, tell the user the job has started and that progress appears in the job \
 dashboard — do NOT claim final results you do not have.
+- NEVER fabricate a job, a job_id, or a "job started" confirmation. A job exists \
+ONLY if you actually called optimize_structure / run_md_simulation in THIS turn \
+and it returned a real job_id. Report exactly the job_id the tool returned — never \
+invent, guess, or reuse one. If you did not call the tool, or the tool returned a \
+status of "error", say plainly that no job was started and state why (e.g. the \
+job-quota limit, no active structure, or a tool error) — do not pretend it \
+succeeded.
+- If you intend to start a job, you MUST emit the tool call. Describing the action \
+in prose is not the same as doing it; only a real tool call runs anything.
 - After a search, present the results as a compact Markdown table (id, formula, \
 source, band gap, formation energy).
 - For conceptual questions, greetings, or anything answerable from the \
