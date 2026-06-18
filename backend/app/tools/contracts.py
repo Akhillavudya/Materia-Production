@@ -59,6 +59,10 @@ class GenerateVaspInputsInput(BaseModel):
         False, description="enable DFT+U (curated U values for transition-metal d-electrons)")
     dipole: bool = Field(
         False, description="add a dipole correction along c (slabs / charged cells)")
+    solvent: str = Field(
+        "none",
+        description=('implicit solvation: "none" | "vaspsol" | "vaspsol++" '
+                     '(requires the VASPsol-patched VASP binary)'))
     charge: float = Field(
         0.0, description="net cell charge in e (positive = electrons removed); sets NELECT")
 

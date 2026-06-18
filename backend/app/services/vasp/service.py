@@ -196,6 +196,11 @@ def _modifier_warnings(modifiers: dict) -> list[str]:
     if modifiers.get("hubbard_u"):
         warns.append("DFT+U uses curated default U values for transition metals — "
                      "verify them against the literature for your system.")
+    solvent = (modifiers.get("solvent") or "none").lower()
+    if solvent != "none":
+        warns.append(f"{solvent} implicit solvation requires the VASPsol-patched VASP "
+                     "binary; the LSOL tags are ignored by a stock VASP build. For a "
+                     "charged interface, combine with `charge` (sets NELECT).")
     return warns
 
 

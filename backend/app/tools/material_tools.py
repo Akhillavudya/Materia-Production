@@ -291,6 +291,7 @@ def _enforce_atom_cap(poscar_path: Path) -> Optional[dict]:
 # Allowed modifier values (the agent-facing choices for generate_vasp_inputs).
 _FUNCTIONALS = {"pbe", "hse06", "scan"}
 _VDW_OPTIONS = {"none", "d3", "d3bj", "optb88", "df2"}
+_SOLVENTS = {"none", "vaspsol", "vaspsol++"}
 
 
 def generate_vasp_inputs(
@@ -304,6 +305,7 @@ def generate_vasp_inputs(
     soc:         bool          = False,
     hubbard_u:   bool          = False,
     dipole:      bool          = False,
+    solvent:     str           = "none",
     charge:      float         = 0.0,
     **overrides,
 ) -> dict:
@@ -333,6 +335,10 @@ def generate_vasp_inputs(
     if vdw not in _VDW_OPTIONS:
         return {"status": "error",
                 "message": f"Invalid vdw '{vdw}'. Use: {' | '.join(sorted(_VDW_OPTIONS))}."}
+    solvent = (solvent or "none").lower().strip()
+    if solvent not in _SOLVENTS:
+        return {"status": "error",
+                "message": f"Invalid solvent '{solvent}'. Use: {' | '.join(sorted(_SOLVENTS))}."}
 
     # ── resolve the input structure ───────────────────────────────────────────
     try:
@@ -348,7 +354,7 @@ def generate_vasp_inputs(
     modifiers = {
         "functional": functional, "vdw": vdw, "soc": bool(soc),
         "hubbard_u": bool(hubbard_u), "dipole": bool(dipole),
-        "charge": float(charge or 0.0),
+        "solvent": solvent, "charge": float(charge or 0.0),
     }
 
     # ── build the input set ────────────────────────────────────────────────────
