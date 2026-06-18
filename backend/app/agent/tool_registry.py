@@ -7,6 +7,7 @@ the executor never drift from the actual tool signatures.
 
 from app.tools import material_tools
 from app.tools.contracts import (
+    AnalyzeSymmetryInput,
     BuildStructureInput,
     GeneratePoscarInput,
     GenerateVaspInputsInput,
@@ -25,6 +26,7 @@ _TOOL_SPECS = [
     ("generate_vasp_inputs", "Generating VASP inputs",       GenerateVaspInputsInput),
     ("generate_poscar",      "Generating POSCAR",            GeneratePoscarInput),
     ("build_structure",      "Building structure",           BuildStructureInput),
+    ("analyze_symmetry",     "Analyzing symmetry",           AnalyzeSymmetryInput),
     ("read_file",            "Reading file",                 ReadFileInput),
     ("list_files",           "Listing session files",        ListFilesInput),
     ("list_models",          "Listing models",               ListModelsInput),

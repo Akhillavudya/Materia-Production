@@ -585,6 +585,63 @@ def build_structure(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# TOOL — analyze_symmetry  (read-only; Step 5.5)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def analyze_symmetry(
+    poscar_path: Optional[str] = None,
+    material_id: Optional[str] = None,
+    source:      Optional[str] = None,
+    symprec:     float         = 0.01,
+    write:       Optional[str] = None,
+) -> dict:
+    """Report the symmetry of a structure (space group, point group, crystal system).
+
+    Read-only by default. Set `write` to "primitive" or "conventional" to also save
+    that standard cell as the active POSCAR. Operates on the active session
+    structure unless `poscar_path` or `material_id` (+ `source`) is given.
+    """
+    try:
+        structure = _resolve_build_input(material_id, source, poscar_path)
+    except _StructureError as e:
+        return {"status": "error", "message": str(e)}
+
+    try:
+        data = builder.analyze_symmetry(structure, symprec=symprec)
+    except Exception as e:  # noqa: BLE001
+        return {"status": "error", "message": f"Symmetry analysis failed: {e}"}
+
+    files_written: list[str] = []
+    write_kind = (write or "").lower().strip()
+    if write_kind in ("primitive", "conventional"):
+        try:
+            std = builder.standard_structure(structure, write_kind, symprec=symprec)
+        except Exception as e:  # noqa: BLE001
+            return {"status": "error", "message": f"Could not build the {write_kind} cell: {e}"}
+        if len(std) > settings.max_atoms:
+            return {"status": "error",
+                    "message": (f"The {write_kind} cell has {len(std)} atoms, above the "
+                                f"{settings.max_atoms}-atom limit.")}
+        formula = std.composition.reduced_formula
+        try:
+            write_poscar(std, session_dir(), name=formula)
+        except Exception as e:  # noqa: BLE001
+            return {"status": "error", "message": f"Could not write the structure: {e}"}
+        files_written = ["POSCAR", f"POSCAR_{formula}"]
+    elif write_kind:
+        return {"status": "error",
+                "message": f"Invalid write '{write}'. Use: primitive | conventional (or omit)."}
+
+    sg = f"{data['space_group_symbol']} (#{data['space_group_number']})"
+    msg = (f"Symmetry: space group {sg}, point group {data['point_group']}, "
+           f"{data['crystal_system']} system, {data['n_symmetry_ops']} symmetry operations.")
+    if files_written:
+        msg += f" Wrote the {write_kind} cell as the active POSCAR."
+
+    return {"status": "success", **data, "files_written": files_written, "message": msg}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # File-classification helper (shared by read_file + list_files)
 # ─────────────────────────────────────────────────────────────────────────────
 

@@ -19,6 +19,36 @@ def _axis_index(axis) -> int:
     return _AXIS_INDEX[key]
 
 
+def analyze_symmetry(structure, symprec=0.01) -> dict:
+    """Return the space-group / point-group symmetry summary for `structure`."""
+    from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
+
+    sga = SpacegroupAnalyzer(structure, symprec=float(symprec))
+    n_prim = len(sga.find_primitive())
+    return {
+        "space_group_symbol":   sga.get_space_group_symbol(),
+        "space_group_number":   sga.get_space_group_number(),
+        "point_group":          sga.get_point_group_symbol(),
+        "crystal_system":       sga.get_crystal_system(),
+        "lattice_system":       sga.get_lattice_type(),
+        "n_symmetry_ops":       len(sga.get_symmetry_operations()),
+        "n_sites":              len(structure),
+        "n_sites_primitive":    n_prim,
+        "n_sites_conventional": len(sga.get_conventional_standard_structure()),
+        "is_primitive":         n_prim == len(structure),
+    }
+
+
+def standard_structure(structure, kind="conventional", symprec=0.01):
+    """Return the conventional or primitive standard cell of `structure`."""
+    from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
+
+    sga = SpacegroupAnalyzer(structure, symprec=float(symprec))
+    if kind == "primitive":
+        return sga.get_primitive_standard_structure()
+    return sga.get_conventional_standard_structure()
+
+
 # Supported output formats for `convert` → file extension.
 CONVERT_EXT = {"poscar": "vasp", "cif": "cif", "xyz": "xyz", "cssr": "cssr", "json": "json"}
 

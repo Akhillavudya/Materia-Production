@@ -164,6 +164,21 @@ class BuildStructureInput(BaseModel):
         "cif", description='[convert] output format: "poscar" | "cif" | "xyz" | "cssr" | "json"')
 
 
+# ── 14.10 analyze_symmetry (Step 5.5) ─────────────────────────────────────────
+
+class AnalyzeSymmetryInput(BaseModel):
+    poscar_path: Optional[str] = Field(
+        None, description="session structure to analyze (defaults to the active POSCAR)")
+    material_id: Optional[str] = Field(
+        None, description="optional: analyze a database structure instead of a session file")
+    source: Optional[str] = Field(
+        None, description='"mp" | "c2db" | "oqmd" (paired with material_id)')
+    symprec: float = Field(
+        0.01, description="symmetry tolerance in Å (larger = looser)")
+    write: Optional[str] = Field(
+        None, description='optionally save a standard cell as POSCAR: "primitive" | "conventional"')
+
+
 # ── 14.6 read_file ────────────────────────────────────────────────────────────
 
 class ReadFileInput(BaseModel):

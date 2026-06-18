@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from app.agent.providers.base import ToolSpec
 from app.tools.contracts import (
+    AnalyzeSymmetryInput,
     BuildStructureInput,
     GeneratePoscarInput,
     GenerateVaspInputsInput,
@@ -61,6 +62,13 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
         "poscar/cif/xyz/cssr/json). Operates on the active session structure by "
         "default, or pass poscar_path / material_id."
     ),
+    "analyze_symmetry": (
+        "Report a structure's symmetry: space group (symbol + number), point group, "
+        "crystal system, and primitive/conventional site counts. Read-only by "
+        "default; set write='primitive' or 'conventional' to also save that standard "
+        "cell as the active POSCAR. Use when the user asks about space group, "
+        "symmetry, or wants the primitive/conventional cell."
+    ),
     "read_file": (
         "Read and parse a file the user uploaded into this session. Structure "
         "files (POSCAR/CONTCAR/CIF/XYZ) are parsed and made the active structure "
@@ -97,6 +105,7 @@ _TOOL_MODELS: list[tuple[str, type[BaseModel]]] = [
     ("generate_vasp_inputs", GenerateVaspInputsInput),
     ("generate_poscar", GeneratePoscarInput),
     ("build_structure", BuildStructureInput),
+    ("analyze_symmetry", AnalyzeSymmetryInput),
     ("read_file", ReadFileInput),
     ("list_files", ListFilesInput),
     ("list_models", ListModelsInput),
