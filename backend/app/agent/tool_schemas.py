@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from app.agent.providers.base import ToolSpec
 from app.tools.contracts import (
+    BuildStructureInput,
     GeneratePoscarInput,
     GenerateVaspInputsInput,
     ListFilesInput,
@@ -48,6 +49,13 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
         "when the user asks just for a POSCAR. Provide a material_id (and source) "
         "from a prior search, or a poscar_path to convert an existing session "
         "structure. Use generate_vasp_inputs instead for the full input set."
+    ),
+    "build_structure": (
+        "Build or modify a crystal structure and save the result as the active "
+        "POSCAR (so it chains into optimize/MD/VASP). Pick an `operation`: "
+        "make_supercell (replicate the cell, e.g. scaling='2 2 1' or '2'). Operates "
+        "on the active session structure by default, or pass poscar_path / "
+        "material_id. Use this for cell enlargement before defects/MD."
     ),
     "read_file": (
         "Read and parse a file the user uploaded into this session. Structure "
@@ -84,6 +92,7 @@ _TOOL_MODELS: list[tuple[str, type[BaseModel]]] = [
     ("search_materials", SearchMaterialsInput),
     ("generate_vasp_inputs", GenerateVaspInputsInput),
     ("generate_poscar", GeneratePoscarInput),
+    ("build_structure", BuildStructureInput),
     ("read_file", ReadFileInput),
     ("list_files", ListFilesInput),
     ("list_models", ListModelsInput),

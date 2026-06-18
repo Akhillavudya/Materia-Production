@@ -26,6 +26,7 @@ from app.domain.vasp import CellRelax, VaspTask
 from app.jobs import store
 from app.jobs.queue import enqueue
 from app.services.search import MaterialQuery, search_service
+from app.services.structure import builder
 from app.services.simulation.calculator_factory import (
     DEFAULT_MACE_MODEL,
     DEFAULT_MATTERSIM_MODEL,
@@ -430,6 +431,87 @@ def generate_poscar(
         "message": (
             f"POSCAR generated for {result['formula']} "
             f"({result['n_sites']} atoms). No other VASP inputs were created."
+        ),
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TOOL — build_structure  (combined structure transforms; Step 5.5)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Operations wired so far. Expanded as later steps land (add_vacuum/make_slab/convert).
+_BUILD_OPERATIONS = {"make_supercell"}
+
+
+def _resolve_build_input(material_id, source, poscar_path):
+    """Resolve the structure to transform: a database id, or the active session POSCAR."""
+    if material_id:
+        return _resolve_structure(material_id, source, None)
+    try:
+        path = find_structure_in_session(poscar_path)
+    except FileNotFoundError as e:
+        raise _StructureError(str(e))
+    return _parse_structure(path)
+
+
+def build_structure(
+    operation:   str,
+    material_id: Optional[str] = None,
+    source:      Optional[str] = None,
+    poscar_path: Optional[str] = None,
+    scaling:     Optional[str] = None,
+) -> dict:
+    """Transform a crystal structure and save the result as the active POSCAR.
+
+    Operations (selected by `operation`):
+      - make_supercell: replicate the cell, e.g. scaling="2 2 1" or "2".
+
+    Operates on the active session structure by default; pass `poscar_path` for a
+    specific session file or `material_id` (+ `source`) to fetch one from a database.
+    Writes ``POSCAR`` + ``POSCAR_<formula>`` so the result chains into the next tool.
+    """
+    op = (operation or "").lower().strip()
+    if op not in _BUILD_OPERATIONS:
+        return {"status": "error",
+                "message": (f"Invalid operation '{operation}'. Use: "
+                            f"{' | '.join(sorted(_BUILD_OPERATIONS))}.")}
+
+    try:
+        structure = _resolve_build_input(material_id, source, poscar_path)
+    except _StructureError as e:
+        return {"status": "error", "message": str(e)}
+    n_before = len(structure)
+
+    try:
+        if op == "make_supercell":
+            result = builder.make_supercell(structure, scaling)
+        else:  # pragma: no cover - guarded by _BUILD_OPERATIONS
+            return {"status": "error", "message": f"Operation '{op}' is not implemented."}
+    except Exception as e:  # noqa: BLE001 — surface a friendly message
+        return {"status": "error", "message": f"{op} failed: {e}"}
+
+    if len(result) > settings.max_atoms:
+        return {"status": "error",
+                "message": (f"The result has {len(result)} atoms, above the "
+                            f"{settings.max_atoms}-atom limit on this server. "
+                            "Use a smaller scaling factor.")}
+
+    formula = result.composition.reduced_formula
+    try:
+        write_poscar(result, session_dir(), name=formula)
+    except Exception as e:  # noqa: BLE001
+        return {"status": "error", "message": f"Could not write the structure: {e}"}
+
+    return {
+        "status":         "success",
+        "operation":      op,
+        "formula":        formula,
+        "n_sites_before": n_before,
+        "n_sites":        len(result),
+        "files_written":  ["POSCAR", f"POSCAR_{formula}"],
+        "message": (
+            f"{op}: {formula} now has {len(result)} atoms (was {n_before}). "
+            "Wrote POSCAR — this structure is now active for the next step."
         ),
     }
 

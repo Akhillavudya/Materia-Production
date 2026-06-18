@@ -130,6 +130,21 @@ class GeneratePoscarInput(BaseModel):
         None, description="existing session structure file to convert to a POSCAR")
 
 
+# ── 14.9 build_structure (Step 5.5) ───────────────────────────────────────────
+
+class BuildStructureInput(BaseModel):
+    operation: str = Field(
+        ..., description='transform to apply: "make_supercell"')
+    material_id: Optional[str] = Field(
+        None, description="optional: fetch + transform a database structure instead of a session file")
+    source: Optional[str] = Field(
+        None, description='"mp" | "c2db" | "oqmd" (paired with material_id)')
+    poscar_path: Optional[str] = Field(
+        None, description="session structure to transform (defaults to the active POSCAR)")
+    scaling: Optional[str] = Field(
+        None, description='[make_supercell] supercell size, e.g. "2 2 1" or "2"')
+
+
 # ── 14.6 read_file ────────────────────────────────────────────────────────────
 
 class ReadFileInput(BaseModel):

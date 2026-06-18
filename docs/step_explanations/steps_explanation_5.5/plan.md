@@ -47,7 +47,7 @@ for a structure you already had. Two things were missing:
 | 1 | 7 new base tasks (aimd/elastic/phonon/dielectric/bader/elf/workfunction) | `step1_explanation.md` ✅ |
 | 2 | Expose modifiers (functional/vdw/soc/hubbard_u/dipole/charge) | `step2_explanation.md` ✅ |
 | 3 | Solvent modifier (vaspsol / vaspsol++) + warnings | `step3_explanation.md` ✅ |
-| 4 | `build_structure` scaffold + `make_supercell` | `step4_explanation.md` |
+| 4 | `build_structure` scaffold + `make_supercell` | `step4_explanation.md` ✅ |
 | 5 | `add_vacuum` operation | `step5_explanation.md` |
 | 6 | `make_slab` operation | `step6_explanation.md` |
 | 7 | `convert` operation | `step7_explanation.md` |
@@ -64,7 +64,9 @@ for a structure you already had. Two things were missing:
 - [x] **Step 2** — modifiers wired; hse06+band, soc, vdw, +U, charge→NELECT, dipole verified; no-op default.
 - [x] **Step 3** — solvent emits LSOL (+LRHOB/NC_K for ++) + warns about the patched VASP binary;
       pairs with charge for charged interfaces.
-- [ ] **Steps 4–8** — structure tools write POSCARs; atom cap rejects oversized cells; tools chain.
+- [x] **Step 4** — `build_structure`+`make_supercell` writes the active POSCAR; atom cap rejects
+      oversized supercells; registered in the agent schema (operation required).
+- [ ] **Steps 5–8** — add_vacuum/make_slab/convert + analyze_symmetry; tools chain.
 - [ ] **Step 9** — defect tools import and run after the dependency is added.
 - [ ] **Step 11** — Docker image rebuilds; one VASP gen + one structure op verified end-to-end.
 
