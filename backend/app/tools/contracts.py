@@ -41,7 +41,10 @@ class GenerateVaspInputsInput(BaseModel):
     poscar_path: Optional[str] = Field(
         None, description="existing session structure file to use instead of an id")
     task: str = Field(
-        "relaxation", description='"static" | "relaxation" | "band" | "dos"')
+        "relaxation",
+        description=('calculation type: "static" | "relaxation" | "band" | "dos" | '
+                    '"aimd" | "elastic" | "phonon_dfpt" | "dielectric" | "bader" | '
+                    '"elf" | "workfunction"'))
     cell_relax: str = Field(
         "none", description='"none" | "shape" | "full"')
 

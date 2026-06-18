@@ -67,6 +67,65 @@ _INCAR_TASKS: dict[str, dict] = {
         "LORBIT":   11,
         "LCHARG":   ".TRUE.",
     },
+    "elastic": {
+        # Elastic constants via finite differences of the stress tensor.
+        "IBRION":  6,
+        "ISIF":    3,
+        "NFREE":   2,
+        "NSW":     1,
+        "EDIFF":   "1E-7",     # tight electronic convergence for accurate stress
+        "ISMEAR":  0,
+        "SIGMA":   0.05,
+    },
+    "phonon_dfpt": {
+        # Γ-point phonons + Born charges via density-functional perturbation theory.
+        "IBRION":   8,
+        "LEPSILON": ".TRUE.",  # also yields the ion-clamped dielectric tensor
+        "NSW":      1,
+        "EDIFF":    "1E-8",    # phonons need very tight convergence
+        "ISMEAR":   0,
+        "SIGMA":    0.05,
+    },
+    "dielectric": {
+        # Frequency-dependent dielectric function (independent-particle, LOPTIC).
+        "IBRION":  -1,
+        "NSW":      0,
+        "LOPTIC":   ".TRUE.",
+        "CSHIFT":   0.100,     # complex shift for the Kramers-Kronig transform
+        "NEDOS":    2000,
+        "LREAL":    ".FALSE.", # LOPTIC requires reciprocal-space projection
+        "ISMEAR":   0,
+        "SIGMA":    0.05,
+    },
+    "bader": {
+        # Static run that writes the all-electron density for Bader analysis.
+        "IBRION":  -1,
+        "NSW":      0,
+        "LAECHG":   ".TRUE.",  # AECCAR0/AECCAR2 for the bader code
+        "LCHARG":   ".TRUE.",
+        "ISMEAR":  -5,
+    },
+    "elf": {
+        # Electron localization function.
+        "IBRION":  -1,
+        "NSW":      0,
+        "LELF":     ".TRUE.",
+        "LCHARG":   ".TRUE.",
+        "ISMEAR":   0,
+        "SIGMA":    0.05,
+    },
+    "workfunction": {
+        # Slab static run writing the planar-averaged potential (LVTOT/LVHAR)
+        # with a dipole correction along c so the vacuum level is well defined.
+        "IBRION":  -1,
+        "NSW":      0,
+        "LVTOT":    ".TRUE.",
+        "LVHAR":    ".TRUE.",
+        "LDIPOL":   ".TRUE.",
+        "IDIPOL":   3,
+        "ISMEAR":   0,
+        "SIGMA":    0.05,
+    },
     "md_nvt": {
         "IBRION":   0,
         "MDALGO":   2,          # NVT Nosé-Hoover

@@ -3,9 +3,11 @@
 Framework-agnostic vocabulary shared by the VASP service, the
 `generate_vasp_inputs` tool, and the `/api/vasp/tasks` catalog endpoint.
 
-All four tasks (``STATIC``, ``RELAXATION``, ``BAND``, ``DOS``) are wired in the
-VASP service. ``BAND`` emits a non-self-consistent line-mode KPOINTS path and
-``DOS`` a dense tetrahedron mesh (§9 "VASP completeness").
+The core tasks (``STATIC``, ``RELAXATION``, ``BAND``, ``DOS``) plus the Step 5.5
+single-directory tasks (``AIMD``, ``ELASTIC``, ``PHONON_DFPT``, ``DIELECTRIC``,
+``BADER``, ``ELF``, ``WORKFUNCTION``) are all wired in the VASP service. ``BAND``
+emits a non-self-consistent line-mode KPOINTS path, ``DOS`` a dense tetrahedron
+mesh, and ``AIMD`` a Γ-only mesh (§9 "VASP completeness").
 """
 
 from __future__ import annotations
@@ -20,6 +22,14 @@ class VaspTask(str, Enum):
     RELAXATION = "relaxation"
     BAND = "band"          # non-SCF band structure (line-mode KPOINTS)
     DOS = "dos"            # dense tetrahedron DOS
+    # Step 5.5 — single-directory calculation types.
+    AIMD = "aimd"                  # ab-initio MD (IBRION=0); Gamma-only mesh
+    ELASTIC = "elastic"            # elastic constants (IBRION=6)
+    PHONON_DFPT = "phonon_dfpt"    # DFPT Γ-phonons (IBRION=8)
+    DIELECTRIC = "dielectric"      # frequency-dependent dielectric (LOPTIC)
+    BADER = "bader"                # all-electron density for Bader (LAECHG)
+    ELF = "elf"                    # electron localization function (LELF)
+    WORKFUNCTION = "workfunction"  # slab potential + dipole (LVTOT/LVHAR/LDIPOL)
 
 
 class CellRelax(str, Enum):

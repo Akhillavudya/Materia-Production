@@ -100,8 +100,12 @@ steps**, to avoid repeated slow ARM builds.
 
 ## Verified
 *(updated as steps land)*
-- [ ] Step 0 — existing static/relaxation/band/DOS INCARs unchanged after scaffolding.
-- [ ] Step 1–3 — each new task/modifier emits the expected INCAR tags; combinations work.
+- [x] Step 0 — existing static/relaxation/band/DOS INCARs **byte-identical** after scaffolding;
+      modifiers inject their tags when explicitly passed.
+- [x] Step 1 — aimd/elastic/phonon_dfpt/dielectric/bader/elf/workfunction each emit the expected
+      INCAR tags via `build_input_set`; AIMD gets a Γ-only mesh, dielectric/phonon a denser mesh;
+      `/api/vasp/tasks` lists all 11; core tasks unchanged.
+- [ ] Step 2–3 — each new modifier emits the expected INCAR tags; combinations work.
 - [ ] Step 4–8 — structure tools write POSCARs; atom cap rejects oversized cells; tools chain.
 - [ ] Step 9 — defect tools import and run after the dependency is added.
 - [ ] Step 11 — Docker image rebuilds; one VASP gen + one structure op verified end-to-end.

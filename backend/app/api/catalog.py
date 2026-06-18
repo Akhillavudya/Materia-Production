@@ -16,6 +16,8 @@ router = APIRouter()
 # All tasks whose templates are wired in services/vasp/service.py.
 _AVAILABLE_TASKS = [
     VaspTask.STATIC, VaspTask.RELAXATION, VaspTask.BAND, VaspTask.DOS,
+    VaspTask.AIMD, VaspTask.ELASTIC, VaspTask.PHONON_DFPT, VaspTask.DIELECTRIC,
+    VaspTask.BADER, VaspTask.ELF, VaspTask.WORKFUNCTION,
 ]
 
 

@@ -21,15 +21,24 @@ logger = get_logger(__name__)
 
 # User-facing VaspTask → internal INCAR template key.
 _TASK_TO_TEMPLATE = {
-    VaspTask.RELAXATION: "optimization",
-    VaspTask.STATIC:     "static",
-    VaspTask.BAND:       "band",
-    VaspTask.DOS:        "dos",
+    VaspTask.RELAXATION:   "optimization",
+    VaspTask.STATIC:       "static",
+    VaspTask.BAND:         "band",
+    VaspTask.DOS:          "dos",
+    VaspTask.AIMD:         "md_nvt",
+    VaspTask.ELASTIC:      "elastic",
+    VaspTask.PHONON_DFPT:  "phonon_dfpt",
+    VaspTask.DIELECTRIC:   "dielectric",
+    VaspTask.BADER:        "bader",
+    VaspTask.ELF:          "elf",
+    VaspTask.WORKFUNCTION: "workfunction",
 }
 
-# KPOINTS density (k-points per Å^-1) per task. DOS wants a denser mesh.
+# KPOINTS density (k-points per Å^-1) per task. DOS / dielectric / phonon want a
+# denser mesh; AIMD uses a single Γ-point.
 _DEFAULT_DENSITY = 40
 _DOS_DENSITY = 60
+_DENSE_DENSITY = 60
 
 _DEFAULT_ENCUT = 520
 
@@ -71,12 +80,21 @@ class VaspService:
         )
         (out_dir / "INCAR").write_text(incar_txt)
 
-        # KPOINTS — line-mode path for bands, dense mesh for DOS, regular otherwise
+        # KPOINTS — line-mode path for bands, Γ-only for AIMD, dense mesh for
+        # DOS/dielectric/phonon, regular mesh otherwise.
         if task is VaspTask.BAND:
             kpoints_txt = generate_line_kpoints(structure)
             kmesh = None
+        elif task is VaspTask.AIMD:
+            kpoints_txt = generate_kpoints(structure, is_md=True)
+            kmesh = [1, 1, 1]
         else:
-            density = _DOS_DENSITY if task is VaspTask.DOS else _DEFAULT_DENSITY
+            if task is VaspTask.DOS:
+                density = _DOS_DENSITY
+            elif task in (VaspTask.DIELECTRIC, VaspTask.PHONON_DFPT):
+                density = _DENSE_DENSITY
+            else:
+                density = _DEFAULT_DENSITY
             kpoints_txt = generate_kpoints(structure, density=density)
             kmesh = self._kmesh(structure, density)
         (out_dir / "KPOINTS").write_text(kpoints_txt)

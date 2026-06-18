@@ -305,7 +305,8 @@ def generate_vasp_inputs(
         task_enum = VaspTask(task.lower().strip())
     except ValueError:
         return {"status": "error",
-                "message": f"Invalid task '{task}'. Use: static | relaxation | band | dos."}
+                "message": (f"Invalid task '{task}'. Use: "
+                            f"{' | '.join(t.value for t in VaspTask)}.")}
     try:
         cell_enum = CellRelax(cell_relax.lower().strip())
     except ValueError:
