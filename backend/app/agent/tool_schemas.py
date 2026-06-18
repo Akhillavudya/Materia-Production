@@ -55,8 +55,10 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
         "POSCAR (so it chains into optimize/MD/VASP). Pick an `operation`: "
         "make_supercell (replicate the cell, e.g. scaling='2 2 1' or '2'); add_vacuum "
         "(add `thickness` Å of vacuum along `axis` a/b/c — for 2D layers, molecules, "
-        "or padding a slab). Operates on the active session structure by default, or "
-        "pass poscar_path / material_id."
+        "or padding a slab); make_slab (cut a surface along `miller` e.g. '1 1 1' with "
+        "`min_slab_size`/`min_vacuum_size` Å — vacuum is INCLUDED, so do not also call "
+        "add_vacuum). Operates on the active session structure by default, or pass "
+        "poscar_path / material_id."
     ),
     "read_file": (
         "Read and parse a file the user uploaded into this session. Structure "

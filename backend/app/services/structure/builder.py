@@ -19,6 +19,19 @@ def _axis_index(axis) -> int:
     return _AXIS_INDEX[key]
 
 
+def _parse_miller(miller):
+    """Parse a Miller index ('1 1 1' / '1,1,1' / [1,1,1]) into a 3-tuple."""
+    if isinstance(miller, (list, tuple)):
+        vals = [int(v) for v in miller]
+    else:
+        vals = [int(x) for x in str(miller).replace(",", " ").split()]
+    if len(vals) != 3:
+        raise ValueError("miller index must have 3 components, e.g. '1 1 1'.")
+    if all(v == 0 for v in vals):
+        raise ValueError("miller index cannot be (0 0 0).")
+    return tuple(vals)
+
+
 def _parse_scaling(scaling):
     """Parse a supercell spec into an int or a [nx, ny, nz] list.
 
@@ -79,3 +92,32 @@ def add_vacuum(structure, axis="c", thickness=15.0, center=True):
         frac[:, i] = col + (0.5 - (col.min() + col.max()) / 2.0)
         new = Structure(new_lat, new.species, frac)
     return new
+
+
+def make_slab(structure, miller="1 1 1", min_slab_size=10.0, min_vacuum_size=15.0,
+              center_slab=True, lll_reduce=True, shift=0.0):
+    """Cut a surface slab from a bulk structure along a Miller plane.
+
+    Uses pymatgen's ``SlabGenerator``, which **already adds the vacuum gap**
+    (`min_vacuum_size`) — do not also call add_vacuum. Miller indices are defined
+    against the conventional cell, so the bulk is converted to its conventional
+    standard form first (falling back to the input if symmetry analysis fails).
+    """
+    from pymatgen.core.surface import SlabGenerator
+    from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
+
+    hkl = _parse_miller(miller)
+    if float(min_slab_size) <= 0 or float(min_vacuum_size) <= 0:
+        raise ValueError("min_slab_size and min_vacuum_size must be > 0 Å.")
+
+    try:
+        conv = SpacegroupAnalyzer(structure).get_conventional_standard_structure()
+    except Exception:  # noqa: BLE001 — degrade to the raw cell
+        conv = structure
+
+    sg = SlabGenerator(
+        conv, hkl, float(min_slab_size), float(min_vacuum_size),
+        lll_reduce=bool(lll_reduce), center_slab=bool(center_slab),
+        primitive=True, reorient_lattice=True,
+    )
+    return sg.get_slab(shift=float(shift))

@@ -439,8 +439,8 @@ def generate_poscar(
 # TOOL — build_structure  (combined structure transforms; Step 5.5)
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Operations wired so far. Expanded as later steps land (make_slab/convert).
-_BUILD_OPERATIONS = {"make_supercell", "add_vacuum"}
+# Operations wired so far. Expanded as later steps land (convert).
+_BUILD_OPERATIONS = {"make_supercell", "add_vacuum", "make_slab"}
 
 
 def _resolve_build_input(material_id, source, poscar_path):
@@ -463,6 +463,11 @@ def build_structure(
     axis:        str           = "c",
     thickness:   float         = 15.0,
     center:      bool          = True,
+    miller:      str           = "1 1 1",
+    min_slab_size:  float      = 10.0,
+    min_vacuum_size: float     = 15.0,
+    lll_reduce:  bool          = True,
+    shift:       float         = 0.0,
 ) -> dict:
     """Transform a crystal structure and save the result as the active POSCAR.
 
@@ -470,6 +475,8 @@ def build_structure(
       - make_supercell: replicate the cell, e.g. scaling="2 2 1" or "2".
       - add_vacuum: add `thickness` Å of vacuum along `axis` (a/b/c), optionally
         centering the atoms — for 2D layers, molecules, or padding a slab.
+      - make_slab: cut a surface along `miller` (e.g. "1 1 1") with `min_slab_size`
+        and `min_vacuum_size` Å. Vacuum is included — do NOT also call add_vacuum.
 
     Operates on the active session structure by default; pass `poscar_path` for a
     specific session file or `material_id` (+ `source`) to fetch one from a database.
@@ -493,6 +500,12 @@ def build_structure(
         elif op == "add_vacuum":
             result = builder.add_vacuum(structure, axis=axis, thickness=thickness,
                                         center=center)
+        elif op == "make_slab":
+            result = builder.make_slab(structure, miller=miller,
+                                       min_slab_size=min_slab_size,
+                                       min_vacuum_size=min_vacuum_size,
+                                       center_slab=center, lll_reduce=lll_reduce,
+                                       shift=shift)
         else:  # pragma: no cover - guarded by _BUILD_OPERATIONS
             return {"status": "error", "message": f"Operation '{op}' is not implemented."}
     except Exception as e:  # noqa: BLE001 — surface a friendly message
@@ -515,6 +528,8 @@ def build_structure(
         detail = f"now has {len(result)} atoms (was {n_before})"
     elif op == "add_vacuum":
         detail = f"vacuum added along {axis} → lattice abc = {abc} Å"
+    elif op == "make_slab":
+        detail = f"({miller}) slab with {len(result)} atoms, abc = {abc} Å"
     else:  # pragma: no cover
         detail = f"now has {len(result)} atoms"
 

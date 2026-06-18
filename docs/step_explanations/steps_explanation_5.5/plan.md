@@ -49,7 +49,7 @@ for a structure you already had. Two things were missing:
 | 3 | Solvent modifier (vaspsol / vaspsol++) + warnings | `step3_explanation.md` ✅ |
 | 4 | `build_structure` scaffold + `make_supercell` | `step4_explanation.md` ✅ |
 | 5 | `add_vacuum` operation | `step5_explanation.md` ✅ |
-| 6 | `make_slab` operation | `step6_explanation.md` |
+| 6 | `make_slab` operation | `step6_explanation.md` ✅ |
 | 7 | `convert` operation | `step7_explanation.md` |
 | 8 | `analyze_symmetry` (read-only tool) | `step8_explanation.md` |
 | 9 | Defect tools + `pymatgen-analysis-defects` (LAST) | `step9_explanation.md` |
@@ -68,7 +68,9 @@ for a structure you already had. Two things were missing:
       oversized supercells; registered in the agent schema (operation required).
 - [x] **Step 5** — `add_vacuum` extends a lattice axis, recentres atoms, writes active POSCAR; chains
       after make_supercell.
-- [ ] **Steps 6–8** — make_slab/convert + analyze_symmetry.
+- [x] **Step 6** — `make_slab` cuts a Miller-plane surface (vacuum included) via SlabGenerator;
+      conventional-cell conversion; atom-capped; active POSCAR written.
+- [ ] **Steps 7–8** — convert + analyze_symmetry.
 - [ ] **Step 9** — defect tools import and run after the dependency is added.
 - [ ] **Step 11** — Docker image rebuilds; one VASP gen + one structure op verified end-to-end.
 

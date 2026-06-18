@@ -134,7 +134,7 @@ class GeneratePoscarInput(BaseModel):
 
 class BuildStructureInput(BaseModel):
     operation: str = Field(
-        ..., description='transform to apply: "make_supercell" | "add_vacuum"')
+        ..., description='transform to apply: "make_supercell" | "add_vacuum" | "make_slab"')
     material_id: Optional[str] = Field(
         None, description="optional: fetch + transform a database structure instead of a session file")
     source: Optional[str] = Field(
@@ -148,7 +148,17 @@ class BuildStructureInput(BaseModel):
     thickness: float = Field(
         15.0, description="[add_vacuum] vacuum thickness in Å")
     center: bool = Field(
-        True, description="[add_vacuum] recenter atoms within the enlarged cell")
+        True, description="[add_vacuum / make_slab] recenter atoms within the cell")
+    miller: str = Field(
+        "1 1 1", description='[make_slab] Miller index of the surface, e.g. "1 1 1"')
+    min_slab_size: float = Field(
+        10.0, description="[make_slab] minimum slab thickness in Å")
+    min_vacuum_size: float = Field(
+        15.0, description="[make_slab] vacuum gap in Å (slab already includes vacuum)")
+    lll_reduce: bool = Field(
+        True, description="[make_slab] LLL-reduce the slab cell")
+    shift: float = Field(
+        0.0, description="[make_slab] termination shift (selects which surface cut)")
 
 
 # ── 14.6 read_file ────────────────────────────────────────────────────────────
