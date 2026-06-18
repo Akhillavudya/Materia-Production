@@ -53,7 +53,7 @@ for a structure you already had. Two things were missing:
 | 7 | `convert` operation | `step7_explanation.md` ✅ |
 | 8 | `analyze_symmetry` (read-only tool) | `step8_explanation.md` ✅ |
 | 9 | Defect tools + `pymatgen-analysis-defects` (LAST) | `step9_explanation.md` ✅ |
-| 10 | Frontend surfacing (tasks/modifiers form + tool labels) | `step10_explanation.md` |
+| 10 | Frontend surfacing (tool labels; no form — chat-driven) | `step10_explanation.md` ✅ |
 | 11 | ONE Docker image rebuild + smoke test | `step11_explanation.md` |
 
 ---

@@ -1,14 +1,18 @@
+// Friendly labels for the current agent tools (kept in sync with tool_registry.py).
 const TOOL_LABELS = {
-  generate_vasp_poscar:                          'Fetching structure from Materials Project',
-  generate_vasp_poscar_with_vacancy_defects:     'Generating vacancy defects',
-  generate_vasp_poscar_with_substitution_defects:'Generating substitution defects',
-  generate_supercell_from_poscar:                'Building supercell',
-  generate_surface_slab_from_poscar:             'Creating surface slab',
-  customize_vasp_kpoints_with_accuracy:          'Generating KPOINTS',
-  generate_vasp_inputs_from_poscar:              'Preparing VASP input files',
-  generate_vasp_workflow_of_eos:                 'Building EOS workflow',
-  run_simulation_using_mlps:                     'Running MLP simulation',
-  visualize_structure_from_poscar:               'Rendering structure',
+  search_materials:     'Searching material databases',
+  generate_vasp_inputs: 'Generating VASP inputs',
+  generate_poscar:      'Generating POSCAR',
+  build_structure:      'Building structure',
+  analyze_symmetry:     'Analyzing symmetry',
+  create_vacancy:       'Creating vacancy defect',
+  create_substitution:  'Creating substitution defect',
+  create_interstitial:  'Creating interstitial defect',
+  read_file:            'Reading file',
+  list_files:           'Listing session files',
+  list_models:          'Listing models',
+  optimize_structure:   'Optimizing structure',
+  run_md_simulation:    'Running MD simulation',
 }
 
 // inject spin keyframe once
