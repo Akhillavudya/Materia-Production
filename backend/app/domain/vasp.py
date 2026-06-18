@@ -51,3 +51,5 @@ class VaspInputSet(BaseModel):
     n_sites: int | None = None
     potentials: dict[str, str] = Field(default_factory=dict)  # element -> POTCAR label
     warnings: list[str] = Field(default_factory=list)
+    modifiers: dict[str, str] = Field(default_factory=dict)   # applied non-default modifiers
+    nelect: float | None = None                               # set only for charged cells

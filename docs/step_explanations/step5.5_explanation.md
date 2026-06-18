@@ -105,7 +105,10 @@ steps**, to avoid repeated slow ARM builds.
 - [x] Step 1 — aimd/elastic/phonon_dfpt/dielectric/bader/elf/workfunction each emit the expected
       INCAR tags via `build_input_set`; AIMD gets a Γ-only mesh, dielectric/phonon a denser mesh;
       `/api/vasp/tasks` lists all 11; core tasks unchanged.
-- [ ] Step 2–3 — each new modifier emits the expected INCAR tags; combinations work.
+- [x] Step 2 — functional(hse06/scan)/vdw/soc/hubbard_u/dipole/charge wired through the tool +
+      service; verified hse06+band, soc+static, vdw d3, +U on Fe, charge+1→NELECT=7, dipole, and a
+      no-modifier no-op; modifier params appear in the agent schema; invalid functional/vdw rejected.
+- [ ] Step 3 — solvent (vaspsol / vaspsol++) emits LSOL + warns about the patched binary.
 - [ ] Step 4–8 — structure tools write POSCARs; atom cap rejects oversized cells; tools chain.
 - [ ] Step 9 — defect tools import and run after the dependency is added.
 - [ ] Step 11 — Docker image rebuilds; one VASP gen + one structure op verified end-to-end.

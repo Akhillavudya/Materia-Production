@@ -35,7 +35,12 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
     "generate_vasp_inputs": (
         "Generate a complete VASP input set (POSCAR + INCAR + KPOINTS) for a "
         "material. Provide a material_id (and source) from a prior search, or a "
-        "poscar_path for an existing session structure. Fast/synchronous."
+        "poscar_path for an existing session structure. Choose a `task` "
+        "(static/relaxation/band/dos/aimd/elastic/phonon_dfpt/dielectric/bader/elf/"
+        "workfunction) and optionally stack modifiers that apply to ANY task: "
+        "`functional` (pbe/hse06/scan), `vdw`, `soc`, `hubbard_u`, `dipole`, and "
+        "`charge` (sets NELECT). E.g. an HSE06 band structure = task=band, "
+        "functional=hse06. Fast/synchronous."
     ),
     "generate_poscar": (
         "Generate ONLY a POSCAR structure file (no INCAR/KPOINTS/POTCAR). Use this "

@@ -51,8 +51,14 @@ class VaspService:
         cell_relax: CellRelax = CellRelax.NONE,
         output_dir: Path | None = None,
         overrides: dict | None = None,
+        modifiers: dict | None = None,
     ) -> VaspInputSet:
-        """Write POSCAR + INCAR + KPOINTS + POTCAR.spec into `output_dir`."""
+        """Write POSCAR + INCAR + KPOINTS + POTCAR.spec into `output_dir`.
+
+        `modifiers` are the orthogonal knobs (functional/vdw/soc/hubbard_u/dipole/
+        solvent/charge) layered on top of the task; ``charge`` is resolved here into
+        a concrete ``NELECT`` from the POTCAR valence counts.
+        """
         template = _TASK_TO_TEMPLATE.get(task)
         if template is None:
             raise ValueError(
@@ -63,6 +69,7 @@ class VaspService:
         out_dir = Path(output_dir) if output_dir else Path.cwd()
         out_dir.mkdir(parents=True, exist_ok=True)
         overrides = dict(overrides or {})
+        modifiers = dict(modifiers or {})
 
         # POSCAR
         formula = structure.composition.reduced_formula
@@ -74,9 +81,27 @@ class VaspService:
                     or max(_DEFAULT_ENCUT, potcar.recommended_encut or 0))
         overrides["ENCUT"] = encut
 
-        # INCAR
+        # charge → NELECT (needs the POTCAR valence counts), plus modifier warnings.
+        charge = float(modifiers.pop("charge", 0.0) or 0.0)
+        warnings = list(potcar.warnings)
+        nelect = None
+        if charge:
+            nelect, neutral = _compute_nelect(structure, potcar, charge)
+            if nelect is not None:
+                overrides.setdefault("NELECT", f"{nelect:g}")
+                warnings.append(
+                    f"Charged cell: NELECT={nelect:g} (neutral={neutral:g}, "
+                    f"charge={charge:+g} e). VASP adds a compensating uniform background.")
+            else:
+                warnings.append(
+                    "charge was requested but NELECT could not be computed (unknown "
+                    "ZVAL for some element); set NELECT manually.")
+        warnings.extend(_modifier_warnings(modifiers))
+
+        # INCAR — modifiers (functional/vdw/soc/hubbard_u/dipole/solvent) + overrides.
         incar_txt = generate_incar(
-            structure, task=template, cell_relax=cell_relax.value, **overrides
+            structure, task=template, cell_relax=cell_relax.value,
+            **modifiers, **overrides,
         )
         (out_dir / "INCAR").write_text(incar_txt)
 
@@ -109,6 +134,12 @@ class VaspService:
         if potcar.potcar_path:
             files["potcar"] = potcar.potcar_path
 
+        # Non-default modifiers actually applied (for the tool's response summary).
+        applied = {k: str(v) for k, v in modifiers.items()
+                   if v not in (None, False, "", "pbe", "none")}
+        if charge:
+            applied["charge"] = f"{charge:+g}"
+
         return VaspInputSet(
             task=task,
             cell_relax=cell_relax,
@@ -119,7 +150,9 @@ class VaspService:
             formula=formula,
             n_sites=len(structure),
             potentials={e.element: e.label for e in potcar.entries},
-            warnings=potcar.warnings,
+            warnings=warnings,
+            modifiers=applied,
+            nelect=nelect,
         )
 
     @staticmethod
@@ -130,6 +163,40 @@ class VaspService:
             return [int(x) for x in kpts.kpts[0]]
         except Exception:
             return None
+
+
+def _compute_nelect(structure, potcar, charge: float):
+    """Return (nelect, neutral_electrons) for a charged cell, or (None, None).
+
+    NELECT = Σ ZVAL over all atoms − charge (charge>0 ⇒ electrons removed).
+    Returns (None, None) when any element's ZVAL is unknown.
+    """
+    zval = {e.element: e.zval for e in potcar.entries}
+    total = 0.0
+    for site in structure:
+        sym = site.specie.symbol if hasattr(site.specie, "symbol") else str(site.specie)
+        z = zval.get(sym)
+        if z is None:
+            return None, None
+        total += z
+    return total - charge, total
+
+
+def _modifier_warnings(modifiers: dict) -> list[str]:
+    """Human-facing cautions for the requested modifiers."""
+    warns: list[str] = []
+    if (modifiers.get("functional") or "").lower() == "hse06":
+        warns.append("HSE06 is far costlier than PBE (hybrid exact exchange) — "
+                     "expect long runtimes; consider a denser-but-small cell.")
+    if (modifiers.get("functional") or "").lower() == "scan":
+        warns.append("SCAN meta-GGA can be hard to converge; ALGO=All is set.")
+    if modifiers.get("soc"):
+        warns.append("Spin-orbit (noncollinear): MAGMOM must have 3 components per "
+                     "atom — verify the magnetic configuration before running.")
+    if modifiers.get("hubbard_u"):
+        warns.append("DFT+U uses curated default U values for transition metals — "
+                     "verify them against the literature for your system.")
+    return warns
 
 
 # Module-level singleton.

@@ -288,18 +288,30 @@ def _enforce_atom_cap(poscar_path: Path) -> Optional[dict]:
 # TOOL — generate_vasp_inputs  (consolidates POSCAR + KPOINTS + INCAR generation)
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Allowed modifier values (the agent-facing choices for generate_vasp_inputs).
+_FUNCTIONALS = {"pbe", "hse06", "scan"}
+_VDW_OPTIONS = {"none", "d3", "d3bj", "optb88", "df2"}
+
+
 def generate_vasp_inputs(
     material_id: Optional[str] = None,
     source:      Optional[str] = None,
     poscar_path: Optional[str] = None,
     task:        str           = "relaxation",
     cell_relax:  str           = "none",
+    functional:  str           = "pbe",
+    vdw:         str           = "none",
+    soc:         bool          = False,
+    hubbard_u:   bool          = False,
+    dipole:      bool          = False,
+    charge:      float         = 0.0,
     **overrides,
 ) -> dict:
     """Generate a complete VASP input set (POSCAR + INCAR + KPOINTS).
 
     Provide either (`material_id` [+ `source`]) to fetch a structure from a
-    database, or `poscar_path` to use an existing session structure.
+    database, or `poscar_path` to use an existing session structure. The
+    modifiers (functional/vdw/soc/hubbard_u/dipole/charge) combine with any task.
     """
     try:
         task_enum = VaspTask(task.lower().strip())
@@ -313,24 +325,46 @@ def generate_vasp_inputs(
         return {"status": "error",
                 "message": f"Invalid cell_relax '{cell_relax}'. Use: none | shape | full."}
 
+    functional = (functional or "pbe").lower().strip()
+    if functional not in _FUNCTIONALS:
+        return {"status": "error",
+                "message": f"Invalid functional '{functional}'. Use: {' | '.join(sorted(_FUNCTIONALS))}."}
+    vdw = (vdw or "none").lower().strip()
+    if vdw not in _VDW_OPTIONS:
+        return {"status": "error",
+                "message": f"Invalid vdw '{vdw}'. Use: {' | '.join(sorted(_VDW_OPTIONS))}."}
+
     # ── resolve the input structure ───────────────────────────────────────────
     try:
         structure = _resolve_structure(material_id, source, poscar_path)
     except _StructureError as e:
         return {"status": "error", "message": str(e)}
 
+    if len(structure) > settings.max_atoms:
+        return {"status": "error",
+                "message": (f"This structure has {len(structure)} atoms, above the "
+                            f"{settings.max_atoms}-atom limit on this server.")}
+
+    modifiers = {
+        "functional": functional, "vdw": vdw, "soc": bool(soc),
+        "hubbard_u": bool(hubbard_u), "dipole": bool(dipole),
+        "charge": float(charge or 0.0),
+    }
+
     # ── build the input set ────────────────────────────────────────────────────
     out_dir = session_dir() / "vasp_inputs" / task_enum.value
     try:
         input_set = vasp_service.build_input_set(
             structure, task=task_enum, cell_relax=cell_enum,
-            output_dir=out_dir, overrides=overrides or None,
+            output_dir=out_dir, overrides=overrides or None, modifiers=modifiers,
         )
     except Exception as e:
         return {"status": "error", "message": f"VASP input generation failed: {e}"}
 
     files_rel = {k: rel_to_storage(Path(v)) for k, v in input_set.files.items()}
     written = [Path(p).name for p in input_set.files.values()]
+    mod_note = (f" [{', '.join(f'{k}={v}' for k, v in input_set.modifiers.items())}]"
+                if input_set.modifiers else "")
 
     return {
         "status":        "success",
@@ -341,12 +375,14 @@ def generate_vasp_inputs(
         "kmesh":         input_set.kmesh,
         "elements":      input_set.elements,
         "potentials":    input_set.potentials,
+        "modifiers":     input_set.modifiers,
+        "nelect":        input_set.nelect,
         "warnings":      input_set.warnings,
         "files":         files_rel,
         "files_written": written,
         "message": (
             f"VASP {task_enum.value} inputs generated for {input_set.formula} "
-            f"({input_set.n_sites} atoms): {', '.join(written)}."
+            f"({input_set.n_sites} atoms){mod_note}: {', '.join(written)}."
         ),
     }
 

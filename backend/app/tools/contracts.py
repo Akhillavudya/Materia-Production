@@ -47,6 +47,20 @@ class GenerateVaspInputsInput(BaseModel):
                     '"elf" | "workfunction"'))
     cell_relax: str = Field(
         "none", description='"none" | "shape" | "full"')
+    # ── modifiers (Step 5.5) — combine freely with any task ──
+    functional: str = Field(
+        "pbe", description='exchange-correlation functional: "pbe" | "hse06" | "scan"')
+    vdw: str = Field(
+        "none",
+        description='van-der-Waals correction: "none" | "d3" | "d3bj" | "optb88" | "df2"')
+    soc: bool = Field(
+        False, description="enable spin-orbit coupling (noncollinear)")
+    hubbard_u: bool = Field(
+        False, description="enable DFT+U (curated U values for transition-metal d-electrons)")
+    dipole: bool = Field(
+        False, description="add a dipole correction along c (slabs / charged cells)")
+    charge: float = Field(
+        0.0, description="net cell charge in e (positive = electrons removed); sets NELECT")
 
 
 # ── 14.3 optimize_structure ───────────────────────────────────────────────────
