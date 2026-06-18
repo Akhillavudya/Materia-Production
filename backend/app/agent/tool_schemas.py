@@ -53,9 +53,10 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
     "build_structure": (
         "Build or modify a crystal structure and save the result as the active "
         "POSCAR (so it chains into optimize/MD/VASP). Pick an `operation`: "
-        "make_supercell (replicate the cell, e.g. scaling='2 2 1' or '2'). Operates "
-        "on the active session structure by default, or pass poscar_path / "
-        "material_id. Use this for cell enlargement before defects/MD."
+        "make_supercell (replicate the cell, e.g. scaling='2 2 1' or '2'); add_vacuum "
+        "(add `thickness` Å of vacuum along `axis` a/b/c — for 2D layers, molecules, "
+        "or padding a slab). Operates on the active session structure by default, or "
+        "pass poscar_path / material_id."
     ),
     "read_file": (
         "Read and parse a file the user uploaded into this session. Structure "

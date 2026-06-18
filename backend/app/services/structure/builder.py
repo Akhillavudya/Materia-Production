@@ -7,6 +7,17 @@ are added incrementally: Step 4 = make_supercell.
 
 from __future__ import annotations
 
+import numpy as np
+
+_AXIS_INDEX = {"a": 0, "b": 1, "c": 2, "x": 0, "y": 1, "z": 2, "0": 0, "1": 1, "2": 2}
+
+
+def _axis_index(axis) -> int:
+    key = str(axis).lower().strip()
+    if key not in _AXIS_INDEX:
+        raise ValueError("axis must be one of a/b/c (or x/y/z).")
+    return _AXIS_INDEX[key]
+
 
 def _parse_scaling(scaling):
     """Parse a supercell spec into an int or a [nx, ny, nz] list.
@@ -38,3 +49,33 @@ def make_supercell(structure, scaling):
     s = structure.copy()
     s.make_supercell(factor)
     return s
+
+
+def add_vacuum(structure, axis="c", thickness=15.0, center=True):
+    """Extend the cell along `axis` by `thickness` Å of vacuum.
+
+    Lengthens the chosen lattice vector (keeping its direction) while holding atoms
+    at their Cartesian positions, so empty space opens up along that axis. When
+    `center` is true the atoms are recentred within the enlarged cell — the usual
+    choice for slabs and 2D layers.
+    """
+    from pymatgen.core import Lattice, Structure
+
+    thickness = float(thickness)
+    if thickness <= 0:
+        raise ValueError("vacuum thickness must be > 0 Å.")
+    i = _axis_index(axis)
+
+    matrix = structure.lattice.matrix.copy()
+    length = float(np.linalg.norm(matrix[i]))
+    matrix[i] = matrix[i] / length * (length + thickness)
+    new_lat = Lattice(matrix)
+
+    new = Structure(new_lat, structure.species, structure.cart_coords,
+                    coords_are_cartesian=True)
+    if center:
+        frac = new.frac_coords
+        col = frac[:, i]
+        frac[:, i] = col + (0.5 - (col.min() + col.max()) / 2.0)
+        new = Structure(new_lat, new.species, frac)
+    return new

@@ -48,7 +48,7 @@ for a structure you already had. Two things were missing:
 | 2 | Expose modifiers (functional/vdw/soc/hubbard_u/dipole/charge) | `step2_explanation.md` ✅ |
 | 3 | Solvent modifier (vaspsol / vaspsol++) + warnings | `step3_explanation.md` ✅ |
 | 4 | `build_structure` scaffold + `make_supercell` | `step4_explanation.md` ✅ |
-| 5 | `add_vacuum` operation | `step5_explanation.md` |
+| 5 | `add_vacuum` operation | `step5_explanation.md` ✅ |
 | 6 | `make_slab` operation | `step6_explanation.md` |
 | 7 | `convert` operation | `step7_explanation.md` |
 | 8 | `analyze_symmetry` (read-only tool) | `step8_explanation.md` |
@@ -66,7 +66,9 @@ for a structure you already had. Two things were missing:
       pairs with charge for charged interfaces.
 - [x] **Step 4** — `build_structure`+`make_supercell` writes the active POSCAR; atom cap rejects
       oversized supercells; registered in the agent schema (operation required).
-- [ ] **Steps 5–8** — add_vacuum/make_slab/convert + analyze_symmetry; tools chain.
+- [x] **Step 5** — `add_vacuum` extends a lattice axis, recentres atoms, writes active POSCAR; chains
+      after make_supercell.
+- [ ] **Steps 6–8** — make_slab/convert + analyze_symmetry.
 - [ ] **Step 9** — defect tools import and run after the dependency is added.
 - [ ] **Step 11** — Docker image rebuilds; one VASP gen + one structure op verified end-to-end.
 

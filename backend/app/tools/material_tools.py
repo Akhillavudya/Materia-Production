@@ -439,8 +439,8 @@ def generate_poscar(
 # TOOL — build_structure  (combined structure transforms; Step 5.5)
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Operations wired so far. Expanded as later steps land (add_vacuum/make_slab/convert).
-_BUILD_OPERATIONS = {"make_supercell"}
+# Operations wired so far. Expanded as later steps land (make_slab/convert).
+_BUILD_OPERATIONS = {"make_supercell", "add_vacuum"}
 
 
 def _resolve_build_input(material_id, source, poscar_path):
@@ -460,11 +460,16 @@ def build_structure(
     source:      Optional[str] = None,
     poscar_path: Optional[str] = None,
     scaling:     Optional[str] = None,
+    axis:        str           = "c",
+    thickness:   float         = 15.0,
+    center:      bool          = True,
 ) -> dict:
     """Transform a crystal structure and save the result as the active POSCAR.
 
     Operations (selected by `operation`):
       - make_supercell: replicate the cell, e.g. scaling="2 2 1" or "2".
+      - add_vacuum: add `thickness` Å of vacuum along `axis` (a/b/c), optionally
+        centering the atoms — for 2D layers, molecules, or padding a slab.
 
     Operates on the active session structure by default; pass `poscar_path` for a
     specific session file or `material_id` (+ `source`) to fetch one from a database.
@@ -485,6 +490,9 @@ def build_structure(
     try:
         if op == "make_supercell":
             result = builder.make_supercell(structure, scaling)
+        elif op == "add_vacuum":
+            result = builder.add_vacuum(structure, axis=axis, thickness=thickness,
+                                        center=center)
         else:  # pragma: no cover - guarded by _BUILD_OPERATIONS
             return {"status": "error", "message": f"Operation '{op}' is not implemented."}
     except Exception as e:  # noqa: BLE001 — surface a friendly message
@@ -502,15 +510,24 @@ def build_structure(
     except Exception as e:  # noqa: BLE001
         return {"status": "error", "message": f"Could not write the structure: {e}"}
 
+    abc = [round(x, 4) for x in result.lattice.abc]
+    if op == "make_supercell":
+        detail = f"now has {len(result)} atoms (was {n_before})"
+    elif op == "add_vacuum":
+        detail = f"vacuum added along {axis} → lattice abc = {abc} Å"
+    else:  # pragma: no cover
+        detail = f"now has {len(result)} atoms"
+
     return {
         "status":         "success",
         "operation":      op,
         "formula":        formula,
         "n_sites_before": n_before,
         "n_sites":        len(result),
+        "lattice_abc":    abc,
         "files_written":  ["POSCAR", f"POSCAR_{formula}"],
         "message": (
-            f"{op}: {formula} now has {len(result)} atoms (was {n_before}). "
+            f"{op}: {formula} {detail}. "
             "Wrote POSCAR — this structure is now active for the next step."
         ),
     }

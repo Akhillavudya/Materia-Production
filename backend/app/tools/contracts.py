@@ -134,7 +134,7 @@ class GeneratePoscarInput(BaseModel):
 
 class BuildStructureInput(BaseModel):
     operation: str = Field(
-        ..., description='transform to apply: "make_supercell"')
+        ..., description='transform to apply: "make_supercell" | "add_vacuum"')
     material_id: Optional[str] = Field(
         None, description="optional: fetch + transform a database structure instead of a session file")
     source: Optional[str] = Field(
@@ -143,6 +143,12 @@ class BuildStructureInput(BaseModel):
         None, description="session structure to transform (defaults to the active POSCAR)")
     scaling: Optional[str] = Field(
         None, description='[make_supercell] supercell size, e.g. "2 2 1" or "2"')
+    axis: str = Field(
+        "c", description='[add_vacuum] axis to add vacuum along: "a" | "b" | "c"')
+    thickness: float = Field(
+        15.0, description="[add_vacuum] vacuum thickness in Å")
+    center: bool = Field(
+        True, description="[add_vacuum] recenter atoms within the enlarged cell")
 
 
 # ── 14.6 read_file ────────────────────────────────────────────────────────────
