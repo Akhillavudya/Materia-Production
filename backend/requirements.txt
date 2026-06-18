@@ -56,5 +56,5 @@ matplotlib
 requests
 
 # ── NOTE: re-add per upcoming tool (kept out to stay lean) ───────────────────
-# pymatgen-analysis-defects   # when building vacancy/substitution/interstitial tools
+pymatgen-analysis-defects     # vacancy/substitution/interstitial defect tools (Step 5.5)
 # icet                        # when building SQS generation

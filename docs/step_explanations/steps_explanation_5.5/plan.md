@@ -52,7 +52,7 @@ for a structure you already had. Two things were missing:
 | 6 | `make_slab` operation | `step6_explanation.md` ✅ |
 | 7 | `convert` operation | `step7_explanation.md` ✅ |
 | 8 | `analyze_symmetry` (read-only tool) | `step8_explanation.md` ✅ |
-| 9 | Defect tools + `pymatgen-analysis-defects` (LAST) | `step9_explanation.md` |
+| 9 | Defect tools + `pymatgen-analysis-defects` (LAST) | `step9_explanation.md` ✅ |
 | 10 | Frontend surfacing (tasks/modifiers form + tool labels) | `step10_explanation.md` |
 | 11 | ONE Docker image rebuild + smoke test | `step11_explanation.md` |
 
@@ -74,7 +74,8 @@ for a structure you already had. Two things were missing:
       touch the active POSCAR); invalid format rejected.
 - [x] **Step 8** — `analyze_symmetry` reports space/point group + crystal system (read-only); optional
       write of primitive/conventional cell; registered (10 tools total).
-- [ ] **Step 9** — defect tools import and run after the dependency is added.
+- [x] **Step 9** — vacancy/substitution/interstitial tools build defective supercells (geometry-only;
+      charge via generate_vasp_inputs); pymatgen-analysis-defects uncommented; 13 tools total.
 - [ ] **Step 11** — Docker image rebuilds; one VASP gen + one structure op verified end-to-end.
 
 ---

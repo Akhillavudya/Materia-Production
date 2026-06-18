@@ -179,6 +179,46 @@ class AnalyzeSymmetryInput(BaseModel):
         None, description='optionally save a standard cell as POSCAR: "primitive" | "conventional"')
 
 
+# ── 14.11 defect tools (Step 5.5) ─────────────────────────────────────────────
+
+class CreateVacancyInput(BaseModel):
+    element: Optional[str] = Field(
+        None, description="element to remove (defaults to the first site found)")
+    supercell: Optional[str] = Field(
+        None, description='supercell size, e.g. "2 2 2" (omit to auto-size for isolation)')
+    poscar_path: Optional[str] = Field(
+        None, description="session structure to use (defaults to the active POSCAR)")
+    material_id: Optional[str] = Field(
+        None, description="optional: use a database structure instead of a session file")
+    source: Optional[str] = Field(
+        None, description='"mp" | "c2db" | "oqmd" (paired with material_id)')
+
+
+class CreateSubstitutionInput(BaseModel):
+    from_element: str = Field(..., description="element being replaced, e.g. \"Si\"")
+    to_element: str = Field(..., description="replacement element, e.g. \"Al\"")
+    supercell: Optional[str] = Field(
+        None, description='supercell size, e.g. "2 2 2" (omit to auto-size)')
+    poscar_path: Optional[str] = Field(
+        None, description="session structure to use (defaults to the active POSCAR)")
+    material_id: Optional[str] = Field(
+        None, description="optional: use a database structure instead of a session file")
+    source: Optional[str] = Field(
+        None, description='"mp" | "c2db" | "oqmd" (paired with material_id)')
+
+
+class CreateInterstitialInput(BaseModel):
+    insert_element: str = Field(..., description="element to insert, e.g. \"H\" or \"Li\"")
+    supercell: Optional[str] = Field(
+        None, description='supercell size, e.g. "2 2 2" (omit to auto-size)')
+    poscar_path: Optional[str] = Field(
+        None, description="session structure to use (defaults to the active POSCAR)")
+    material_id: Optional[str] = Field(
+        None, description="optional: use a database structure instead of a session file")
+    source: Optional[str] = Field(
+        None, description='"mp" | "c2db" | "oqmd" (paired with material_id)')
+
+
 # ── 14.6 read_file ────────────────────────────────────────────────────────────
 
 class ReadFileInput(BaseModel):

@@ -642,6 +642,100 @@ def analyze_symmetry(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# TOOLS — create_vacancy / create_substitution / create_interstitial (Step 5.5)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _finish_defect(sc, defect_name: str, kind: str, n_bulk: int) -> dict:
+    """Atom-cap, write the defective supercell as the active POSCAR, return the envelope."""
+    if len(sc) > settings.max_atoms:
+        return {"status": "error",
+                "message": (f"The {kind} supercell has {len(sc)} atoms, above the "
+                            f"{settings.max_atoms}-atom limit. Use a smaller supercell.")}
+    formula = sc.composition.reduced_formula
+    try:
+        write_poscar(sc, session_dir(), name=formula)
+    except Exception as e:  # noqa: BLE001
+        return {"status": "error", "message": f"Could not write the structure: {e}"}
+    return {
+        "status":        "success",
+        "defect":        kind,
+        "defect_name":   defect_name,
+        "formula":       formula,
+        "n_sites":       len(sc),
+        "files_written": ["POSCAR", f"POSCAR_{formula}"],
+        "message": (
+            f"Created {kind} ({defect_name}); supercell now has {len(sc)} atoms. "
+            "Wrote POSCAR — active for the next step. To make it a CHARGED defect, run "
+            "generate_vasp_inputs with a `charge` value (it sets NELECT)."
+        ),
+    }
+
+
+def create_vacancy(
+    element:     Optional[str] = None,
+    supercell:   Optional[str] = None,
+    poscar_path: Optional[str] = None,
+    material_id: Optional[str] = None,
+    source:      Optional[str] = None,
+) -> dict:
+    """Create a vacancy (remove one atom) in a supercell and save it as the active POSCAR.
+
+    `element` selects which species to remove (defaults to the first site found).
+    `supercell` like "2 2 2" sizes the cell; omit it to auto-size for defect isolation.
+    """
+    try:
+        structure = _resolve_build_input(material_id, source, poscar_path)
+    except _StructureError as e:
+        return {"status": "error", "message": str(e)}
+    try:
+        sc, name = builder.create_vacancy(structure, element=element, supercell=supercell)
+    except Exception as e:  # noqa: BLE001
+        return {"status": "error", "message": f"Vacancy creation failed: {e}"}
+    return _finish_defect(sc, name, "vacancy", len(structure))
+
+
+def create_substitution(
+    from_element: str,
+    to_element:   str,
+    supercell:    Optional[str] = None,
+    poscar_path:  Optional[str] = None,
+    material_id:  Optional[str] = None,
+    source:       Optional[str] = None,
+) -> dict:
+    """Substitute one `from_element` atom with `to_element` in a supercell; save active POSCAR."""
+    try:
+        structure = _resolve_build_input(material_id, source, poscar_path)
+    except _StructureError as e:
+        return {"status": "error", "message": str(e)}
+    try:
+        sc, name = builder.create_substitution(
+            structure, from_element=from_element, to_element=to_element, supercell=supercell)
+    except Exception as e:  # noqa: BLE001
+        return {"status": "error", "message": f"Substitution failed: {e}"}
+    return _finish_defect(sc, name, "substitution", len(structure))
+
+
+def create_interstitial(
+    insert_element: str,
+    supercell:      Optional[str] = None,
+    poscar_path:    Optional[str] = None,
+    material_id:    Optional[str] = None,
+    source:         Optional[str] = None,
+) -> dict:
+    """Insert `insert_element` at a Voronoi interstitial site in a supercell; save active POSCAR."""
+    try:
+        structure = _resolve_build_input(material_id, source, poscar_path)
+    except _StructureError as e:
+        return {"status": "error", "message": str(e)}
+    try:
+        sc, name = builder.create_interstitial(
+            structure, insert_element=insert_element, supercell=supercell)
+    except Exception as e:  # noqa: BLE001
+        return {"status": "error", "message": f"Interstitial creation failed: {e}"}
+    return _finish_defect(sc, name, "interstitial", len(structure))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # File-classification helper (shared by read_file + list_files)
 # ─────────────────────────────────────────────────────────────────────────────
 

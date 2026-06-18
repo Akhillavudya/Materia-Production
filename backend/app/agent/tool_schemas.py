@@ -16,6 +16,9 @@ from app.agent.providers.base import ToolSpec
 from app.tools.contracts import (
     AnalyzeSymmetryInput,
     BuildStructureInput,
+    CreateInterstitialInput,
+    CreateSubstitutionInput,
+    CreateVacancyInput,
     GeneratePoscarInput,
     GenerateVaspInputsInput,
     ListFilesInput,
@@ -69,6 +72,21 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
         "cell as the active POSCAR. Use when the user asks about space group, "
         "symmetry, or wants the primitive/conventional cell."
     ),
+    "create_vacancy": (
+        "Create a point vacancy (remove one atom) in a supercell and save it as the "
+        "active POSCAR. `element` picks which species to remove; `supercell` (e.g. "
+        "'2 2 2') sizes the cell, or omit it to auto-size for defect isolation. Make "
+        "it charged afterwards via generate_vasp_inputs(charge=...)."
+    ),
+    "create_substitution": (
+        "Create a substitutional defect — replace one `from_element` atom with "
+        "`to_element` — in a supercell, saved as the active POSCAR. `supercell` "
+        "optional (auto-sizes if omitted)."
+    ),
+    "create_interstitial": (
+        "Insert `insert_element` at a Voronoi interstitial site in a supercell, saved "
+        "as the active POSCAR. `supercell` optional (auto-sizes if omitted)."
+    ),
     "read_file": (
         "Read and parse a file the user uploaded into this session. Structure "
         "files (POSCAR/CONTCAR/CIF/XYZ) are parsed and made the active structure "
@@ -106,6 +124,9 @@ _TOOL_MODELS: list[tuple[str, type[BaseModel]]] = [
     ("generate_poscar", GeneratePoscarInput),
     ("build_structure", BuildStructureInput),
     ("analyze_symmetry", AnalyzeSymmetryInput),
+    ("create_vacancy", CreateVacancyInput),
+    ("create_substitution", CreateSubstitutionInput),
+    ("create_interstitial", CreateInterstitialInput),
     ("read_file", ReadFileInput),
     ("list_files", ListFilesInput),
     ("list_models", ListModelsInput),

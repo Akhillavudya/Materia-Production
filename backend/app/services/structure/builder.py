@@ -19,6 +19,65 @@ def _axis_index(axis) -> int:
     return _AXIS_INDEX[key]
 
 
+def _sc_matrix(supercell):
+    """Parse a supercell spec into a diagonal matrix, or None for auto-sizing."""
+    if not supercell:
+        return None
+    vals = [int(x) for x in str(supercell).replace(",", " ").split()]
+    if len(vals) == 1:
+        vals = vals * 3
+    if len(vals) != 3 or any(v < 1 for v in vals):
+        raise ValueError("supercell must be one or three positive integers, e.g. '2 2 2'.")
+    return np.diag(vals)
+
+
+def create_vacancy(structure, element=None, supercell=None):
+    """Return a defective supercell with one `element` atom removed (a vacancy).
+
+    Picks the first symmetry-distinct site of `element` (or any site if omitted).
+    Returns (defect_structure, defect_name).
+    """
+    from pymatgen.analysis.defects.generators import VacancyGenerator
+
+    rm = [element] if element else None
+    defects = list(VacancyGenerator().generate(structure, rm_species=rm))
+    if not defects:
+        raise ValueError(f"no vacancy site found{f' for {element}' if element else ''}.")
+    defect = defects[0]
+    sc = defect.get_supercell_structure(sc_mat=_sc_matrix(supercell))
+    return sc, getattr(defect, "name", "vacancy")
+
+
+def create_substitution(structure, from_element, to_element, supercell=None):
+    """Return a defective supercell with one `from_element` atom replaced by `to_element`."""
+    from pymatgen.analysis.defects.generators import SubstitutionGenerator
+
+    if not from_element or not to_element:
+        raise ValueError("from_element and to_element are required.")
+    defects = list(SubstitutionGenerator().generate(
+        structure, substitution={from_element: [to_element]}))
+    if not defects:
+        raise ValueError(f"no '{from_element}' site found to substitute with '{to_element}'.")
+    defect = defects[0]
+    sc = defect.get_supercell_structure(sc_mat=_sc_matrix(supercell))
+    return sc, getattr(defect, "name", "substitution")
+
+
+def create_interstitial(structure, insert_element, supercell=None):
+    """Return a defective supercell with `insert_element` added at a Voronoi interstitial site."""
+    from pymatgen.analysis.defects.generators import VoronoiInterstitialGenerator
+
+    if not insert_element:
+        raise ValueError("insert_element is required.")
+    defects = list(VoronoiInterstitialGenerator().generate(
+        structure, insert_species=[insert_element]))
+    if not defects:
+        raise ValueError(f"no interstitial site found for '{insert_element}'.")
+    defect = defects[0]
+    sc = defect.get_supercell_structure(sc_mat=_sc_matrix(supercell))
+    return sc, getattr(defect, "name", "interstitial")
+
+
 def analyze_symmetry(structure, symprec=0.01) -> dict:
     """Return the space-group / point-group symmetry summary for `structure`."""
     from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
