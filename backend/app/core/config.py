@@ -108,6 +108,10 @@ class Settings(BaseModel):
     # POTCAR is assembled and authoritative ENMAX is read from it; otherwise only a
     # POTCAR.spec (labels + recommended ENMAX) is emitted. POTCARs are never shipped.
     pmg_vasp_psp_dir: str | None = None
+    # Which PAW functional folder to read from the PSP dir. pymatgen maps this to a
+    # subdir, e.g. "PBE_54" → POT_GGA_PAW_PBE_54, "PBE" → POT_GGA_PAW_PBE. Set this to
+    # match the library you mount (default PBE_54).
+    pmg_vasp_functional: str = "PBE_54"
 
     # ── LLM provider ─────────────────────────────────────────────────────────
     # The agent uses native function-calling (redesign §15). `model_provider`
@@ -257,6 +261,7 @@ def get_settings() -> Settings:
         storage_root=os.getenv("STORAGE_ROOT"),
         vasp_ncore=(int(os.environ["VASP_NCORE"]) if os.getenv("VASP_NCORE") else None),
         pmg_vasp_psp_dir=os.getenv("PMG_VASP_PSP_DIR"),
+        pmg_vasp_functional=os.getenv("PMG_VASP_FUNCTIONAL", "PBE_54"),
         model_provider=os.getenv("MODEL_PROVIDER"),
         groq_api_key=os.getenv("GROQ_API_KEY"),
         groq_model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),

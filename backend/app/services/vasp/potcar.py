@@ -137,7 +137,9 @@ def _try_real_potcar(result: PotcarResult, dest_dir: Path) -> None:
         os.environ.setdefault("PMG_VASP_PSP_DIR", psp_dir)
         from pymatgen.io.vasp.inputs import Potcar
 
-        potcar = Potcar(symbols=result.labels, functional="PBE_54")
+        functional = settings.pmg_vasp_functional or "PBE_54"
+        result.functional = functional
+        potcar = Potcar(symbols=result.labels, functional=functional)
         potcar.write_file(str(dest_dir / "POTCAR"))
         result.potcar_path = str(dest_dir / "POTCAR")
 

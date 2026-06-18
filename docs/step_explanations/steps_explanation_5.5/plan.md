@@ -1,6 +1,6 @@
 # Step 5.5 — Plan: More VASP calculations + structure-building tools
 
-**Status:** 🚧 In progress (started 2026-06-18)
+**Status:** ✅ Complete (2026-06-18) — all 11 steps shipped; ARM image built at Oracle deploy.
 **Goal:** Give PhD users many more kinds of VASP input files from the *one* `generate_vasp_inputs`
 tool, and add tools that **build/modify the crystal structure itself** (supercell, vacuum, slab,
 format conversion, symmetry, point defects) — so they can prepare real research calculations
@@ -54,7 +54,7 @@ for a structure you already had. Two things were missing:
 | 8 | `analyze_symmetry` (read-only tool) | `step8_explanation.md` ✅ |
 | 9 | Defect tools + `pymatgen-analysis-defects` (LAST) | `step9_explanation.md` ✅ |
 | 10 | Frontend surfacing (tool labels; no form — chat-driven) | `step10_explanation.md` ✅ |
-| 11 | ONE Docker image rebuild + smoke test | `step11_explanation.md` |
+| 11 | ONE Docker image rebuild + smoke test | `step11_explanation.md` ✅ |
 
 ---
 
@@ -76,7 +76,8 @@ for a structure you already had. Two things were missing:
       write of primitive/conventional cell; registered (10 tools total).
 - [x] **Step 9** — vacancy/substitution/interstitial tools build defective supercells (geometry-only;
       charge via generate_vasp_inputs); pymatgen-analysis-defects uncommented; 13 tools total.
-- [ ] **Step 11** — Docker image rebuilds; one VASP gen + one structure op verified end-to-end.
+- [x] **Step 11** — backend + frontend images rebuilt; in-image smoke test: new dep imports, HSE06
+      modifier works, real POTCAR (196 KB) assembled from the runtime-mounted PAW library.
 
 ---
 
