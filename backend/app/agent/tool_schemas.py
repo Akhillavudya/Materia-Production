@@ -57,8 +57,9 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
         "(add `thickness` Å of vacuum along `axis` a/b/c — for 2D layers, molecules, "
         "or padding a slab); make_slab (cut a surface along `miller` e.g. '1 1 1' with "
         "`min_slab_size`/`min_vacuum_size` Å — vacuum is INCLUDED, so do not also call "
-        "add_vacuum). Operates on the active session structure by default, or pass "
-        "poscar_path / material_id."
+        "add_vacuum); convert (write the structure in another format via `to_format`: "
+        "poscar/cif/xyz/cssr/json). Operates on the active session structure by "
+        "default, or pass poscar_path / material_id."
     ),
     "read_file": (
         "Read and parse a file the user uploaded into this session. Structure "

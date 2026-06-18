@@ -19,6 +19,29 @@ def _axis_index(axis) -> int:
     return _AXIS_INDEX[key]
 
 
+# Supported output formats for `convert` → file extension.
+CONVERT_EXT = {"poscar": "vasp", "cif": "cif", "xyz": "xyz", "cssr": "cssr", "json": "json"}
+
+
+def to_format(structure, fmt) -> str:
+    """Serialize `structure` to the requested format string.
+
+    Supported: poscar | cif | xyz | cssr | json. XYZ goes through ASE (pymatgen's
+    native XYZ is molecule-oriented and drops the lattice).
+    """
+    key = (fmt or "").lower().strip()
+    if key not in CONVERT_EXT:
+        raise ValueError(f"unknown format '{fmt}'. Use: {', '.join(CONVERT_EXT)}.")
+    if key == "xyz":
+        import io
+        from ase.io import write as ase_write
+        from pymatgen.io.ase import AseAtomsAdaptor
+        buf = io.StringIO()
+        ase_write(buf, AseAtomsAdaptor.get_atoms(structure), format="extxyz")
+        return buf.getvalue()
+    return structure.to(fmt=key)
+
+
 def _parse_miller(miller):
     """Parse a Miller index ('1 1 1' / '1,1,1' / [1,1,1]) into a 3-tuple."""
     if isinstance(miller, (list, tuple)):

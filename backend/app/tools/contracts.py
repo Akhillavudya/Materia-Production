@@ -134,7 +134,8 @@ class GeneratePoscarInput(BaseModel):
 
 class BuildStructureInput(BaseModel):
     operation: str = Field(
-        ..., description='transform to apply: "make_supercell" | "add_vacuum" | "make_slab"')
+        ...,
+        description='"make_supercell" | "add_vacuum" | "make_slab" | "convert"')
     material_id: Optional[str] = Field(
         None, description="optional: fetch + transform a database structure instead of a session file")
     source: Optional[str] = Field(
@@ -159,6 +160,8 @@ class BuildStructureInput(BaseModel):
         True, description="[make_slab] LLL-reduce the slab cell")
     shift: float = Field(
         0.0, description="[make_slab] termination shift (selects which surface cut)")
+    to_format: str = Field(
+        "cif", description='[convert] output format: "poscar" | "cif" | "xyz" | "cssr" | "json"')
 
 
 # ── 14.6 read_file ────────────────────────────────────────────────────────────

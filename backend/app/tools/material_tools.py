@@ -439,8 +439,7 @@ def generate_poscar(
 # TOOL — build_structure  (combined structure transforms; Step 5.5)
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Operations wired so far. Expanded as later steps land (convert).
-_BUILD_OPERATIONS = {"make_supercell", "add_vacuum", "make_slab"}
+_BUILD_OPERATIONS = {"make_supercell", "add_vacuum", "make_slab", "convert"}
 
 
 def _resolve_build_input(material_id, source, poscar_path):
@@ -452,6 +451,35 @@ def _resolve_build_input(material_id, source, poscar_path):
     except FileNotFoundError as e:
         raise _StructureError(str(e))
     return _parse_structure(path)
+
+
+def _convert_structure(structure, to_format: str) -> dict:
+    """Write `structure` in the requested format into the session; return the envelope."""
+    fmt = (to_format or "").lower().strip()
+    if fmt not in builder.CONVERT_EXT:
+        return {"status": "error",
+                "message": (f"Invalid format '{to_format}'. Use: "
+                            f"{' | '.join(builder.CONVERT_EXT)}.")}
+    try:
+        content = builder.to_format(structure, fmt)
+    except Exception as e:  # noqa: BLE001
+        return {"status": "error", "message": f"convert failed: {e}"}
+
+    formula = structure.composition.reduced_formula
+    fname = f"{formula}.{builder.CONVERT_EXT[fmt]}"
+    try:
+        (session_dir() / fname).write_text(content)
+    except Exception as e:  # noqa: BLE001
+        return {"status": "error", "message": f"Could not write {fname}: {e}"}
+
+    return {
+        "status":        "success",
+        "operation":     "convert",
+        "formula":       formula,
+        "format":        fmt,
+        "files_written": [fname],
+        "message": f"convert: wrote {formula} as {fmt.upper()} ({fname}).",
+    }
 
 
 def build_structure(
@@ -468,6 +496,7 @@ def build_structure(
     min_vacuum_size: float     = 15.0,
     lll_reduce:  bool          = True,
     shift:       float         = 0.0,
+    to_format:   str           = "cif",
 ) -> dict:
     """Transform a crystal structure and save the result as the active POSCAR.
 
@@ -477,6 +506,8 @@ def build_structure(
         centering the atoms — for 2D layers, molecules, or padding a slab.
       - make_slab: cut a surface along `miller` (e.g. "1 1 1") with `min_slab_size`
         and `min_vacuum_size` Å. Vacuum is included — do NOT also call add_vacuum.
+      - convert: write the structure in another format (`to_format`: poscar | cif |
+        xyz | cssr | json). Does NOT change the active POSCAR.
 
     Operates on the active session structure by default; pass `poscar_path` for a
     specific session file or `material_id` (+ `source`) to fetch one from a database.
@@ -492,6 +523,11 @@ def build_structure(
         structure = _resolve_build_input(material_id, source, poscar_path)
     except _StructureError as e:
         return {"status": "error", "message": str(e)}
+
+    # convert is special — it writes a format file, not the active POSCAR.
+    if op == "convert":
+        return _convert_structure(structure, to_format)
+
     n_before = len(structure)
 
     try:
