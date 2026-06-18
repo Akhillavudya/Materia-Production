@@ -101,3 +101,80 @@ _ISIF_MAP = {
     "shape": 5,   # shape + positions, fixed volume
     "full":  3,   # shape + volume + positions
 }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Modifier tag groups (Step 5.5)
+#
+# Modifiers are orthogonal knobs that `incar.generate_incar` layers on top of ANY
+# task's tags. Each maps a user-facing choice to the INCAR tags it injects. The
+# "off"/default choice (``pbe`` / ``none`` / disabled) maps to an EMPTY dict, so
+# default generation stays byte-for-byte unchanged when no modifier is requested.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Exchange-correlation functional. PBE is the implicit default (no extra tags).
+# HSE06 and SCAN are mutually exclusive (both set ALGO); the caller validates.
+_FUNCTIONAL_TAGS: dict[str, dict] = {
+    "pbe": {},
+    "hse06": {
+        "LHFCALC":  ".TRUE.",
+        "HFSCREEN": 0.2,        # range-separation parameter ω [Å^-1]
+        "AEXX":     0.25,       # 25% exact exchange
+        "ALGO":     "Damped",   # robust for hybrids
+        "TIME":     0.4,
+        "PRECFOCK": "Fast",
+    },
+    "scan": {
+        "METAGGA":  "SCAN",
+        "LASPH":    ".TRUE.",   # aspherical gradient corrections (required)
+        "ALGO":     "All",
+    },
+}
+
+# Empirical / non-local van-der-Waals dispersion corrections.
+_VDW_TAGS: dict[str, dict] = {
+    "none":   {},
+    "d3":     {"IVDW": 11},     # DFT-D3 (zero damping)
+    "d3bj":   {"IVDW": 12},     # DFT-D3 (Becke-Johnson damping)
+    "optb88": {"GGA": "BO", "PARAM1": 0.1833333333, "PARAM2": 0.2200000000,
+               "LUSE_VDW": ".TRUE.", "AGGAC": 0.0},
+    "df2":    {"GGA": "ML", "LUSE_VDW": ".TRUE.", "Zab_vdW": -1.8867, "AGGAC": 0.0},
+}
+
+# Implicit solvation (VASPsol). Requires the VASPsol-patched VASP binary — the
+# generator warns about this; tags are inert in a stock VASP build.
+_SOLVENT_TAGS: dict[str, dict] = {
+    "none": {},
+    "vaspsol": {
+        "LSOL": ".TRUE.",
+        "EB_K": 78.4,           # bulk relative permittivity (water)
+    },
+    "vaspsol++": {
+        "LSOL":   ".TRUE.",
+        "EB_K":   78.4,
+        "LRHOB":  ".TRUE.",     # linearized Poisson-Boltzmann electrolyte
+        "NC_K":   1.0,          # bulk electrolyte concentration [mol/L]
+    },
+}
+
+# Spin-orbit coupling (noncollinear). MAGMOM must become 3-vectors per atom —
+# the generator emits a warning when this is enabled.
+_SOC_TAGS: dict = {
+    "LSORBIT":       ".TRUE.",
+    "LNONCOLLINEAR": ".TRUE.",
+    "ISYM":          -1,        # symmetry off for noncollinear
+}
+
+# Dipole correction along c (slabs / work-function / charged cells).
+_DIPOLE_TAGS: dict = {
+    "LDIPOL": ".TRUE.",
+    "IDIPOL": 3,
+}
+
+# Curated Hubbard-U values [eV] for common transition-metal d-electrons
+# (LDAUTYPE=2, Dudarev). Elements absent here get U=0 (LDAUL=-1). These are
+# typical literature defaults — the generator warns that they should be verified.
+_HUBBARD_U: dict[str, float] = {
+    "V": 3.25, "Cr": 3.7, "Mn": 3.9, "Fe": 5.3, "Co": 3.32,
+    "Ni": 6.45, "Cu": 4.0, "Mo": 4.38, "W": 6.2,
+}

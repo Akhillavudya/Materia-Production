@@ -10,7 +10,17 @@ Public:
 from typing import Optional
 
 from app.core.config import settings
-from app.services.vasp.templates import _INCAR_COMMON, _INCAR_TASKS, _ISIF_MAP
+from app.services.vasp.templates import (
+    _DIPOLE_TAGS,
+    _FUNCTIONAL_TAGS,
+    _HUBBARD_U,
+    _INCAR_COMMON,
+    _INCAR_TASKS,
+    _ISIF_MAP,
+    _SOC_TAGS,
+    _SOLVENT_TAGS,
+    _VDW_TAGS,
+)
 
 
 def generate_incar(
@@ -21,6 +31,14 @@ def generate_incar(
     nsw:         Optional[int]   = None,
     timestep:    Optional[float] = None,
     ediffg:      Optional[float] = None,
+    # ── modifiers (Step 5.5) — orthogonal knobs layered on top of the task.
+    #    Defaults are inert: with these unset the INCAR is byte-identical to before.
+    functional:  str  = "pbe",
+    vdw:         str  = "none",
+    soc:         bool = False,
+    hubbard_u=None,                  # truthy → DFT+U; dict overrides curated values
+    solvent:     str  = "none",
+    dipole:      bool = False,
     **overrides,
 ) -> str:
     """Generate VASP INCAR content as a string."""
@@ -35,6 +53,9 @@ def generate_incar(
     # Cell relax → ISIF (optimization only)
     if task_key == "optimization":
         tags["ISIF"] = _ISIF_MAP.get(cell_relax.lower(), 2)
+
+    # Modifiers (COMMON → task → MODIFIERS → MD params → overrides). Inert at defaults.
+    tags.update(_modifier_tags(structure, functional, vdw, soc, hubbard_u, solvent, dipole))
 
     if temperature is not None:
         tags["TEBEG"] = temperature
@@ -65,6 +86,63 @@ def generate_incar(
         tags["MAGMOM"] = " ".join(str(m) for m in magmom_vals)
 
     return _format_incar(tags, task_key, cell_relax)
+
+
+def _ordered_elements(structure) -> list[str]:
+    """Unique element symbols in POSCAR/POTCAR order (first appearance)."""
+    seen: list[str] = []
+    for site in structure:
+        sym = site.specie.symbol if hasattr(site.specie, "symbol") else str(site.specie)
+        if sym not in seen:
+            seen.append(sym)
+    return seen
+
+
+def _hubbard_tags(structure, hubbard_u) -> dict:
+    """Build LDAU tags (Dudarev, LDAUTYPE=2) in POTCAR element order.
+
+    `hubbard_u` may be ``True`` (use the curated `_HUBBARD_U` table) or a dict of
+    ``{element: U_eV}`` overriding/extending it. Elements with no U get LDAUL=-1.
+    """
+    if not hubbard_u:
+        return {}
+    u_table = dict(_HUBBARD_U)
+    if isinstance(hubbard_u, dict):
+        u_table.update({k: float(v) for k, v in hubbard_u.items()})
+
+    elements = _ordered_elements(structure)
+    ldaul, ldauu, ldauj = [], [], []
+    for el in elements:
+        if el in u_table:
+            ldaul.append("2")              # d-electrons
+            ldauu.append(f"{u_table[el]:g}")
+            ldauj.append("0")
+        else:
+            ldaul.append("-1")             # no +U
+            ldauu.append("0")
+            ldauj.append("0")
+    return {
+        "LDAU":     ".TRUE.",
+        "LDAUTYPE": 2,
+        "LDAUL":    " ".join(ldaul),
+        "LDAUU":    " ".join(ldauu),
+        "LDAUJ":    " ".join(ldauj),
+        "LMAXMIX":  4,                     # required for d-electron +U
+    }
+
+
+def _modifier_tags(structure, functional, vdw, soc, hubbard_u, solvent, dipole) -> dict:
+    """Merge the requested modifier tag-groups. Returns ``{}`` when all are default."""
+    tags: dict = {}
+    tags.update(_FUNCTIONAL_TAGS.get((functional or "pbe").lower(), {}))
+    tags.update(_VDW_TAGS.get((vdw or "none").lower(), {}))
+    tags.update(_SOLVENT_TAGS.get((solvent or "none").lower(), {}))
+    if soc:
+        tags.update(_SOC_TAGS)
+    if dipole:
+        tags.update(_DIPOLE_TAGS)
+    tags.update(_hubbard_tags(structure, hubbard_u))
+    return tags
 
 
 def _format_incar(tags: dict, task: str, cell_relax: str) -> str:
