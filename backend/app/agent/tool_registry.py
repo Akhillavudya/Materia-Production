@@ -9,6 +9,7 @@ from app.tools import material_tools
 from app.tools.contracts import (
     AnalyzeSymmetryInput,
     BuildStructureInput,
+    ComputeElasticInput,
     CreateInterstitialInput,
     CreateSubstitutionInput,
     CreateVacancyInput,
@@ -38,6 +39,7 @@ _TOOL_SPECS = [
     ("list_models",          "Listing models",               ListModelsInput),
     ("optimize_structure",   "Optimizing structure",         OptimizeStructureInput),
     ("run_md_simulation",    "Running MD simulation",         RunMdSimulationInput),
+    ("compute_elastic_tensor", "Computing elastic properties", ComputeElasticInput),
 ]
 
 

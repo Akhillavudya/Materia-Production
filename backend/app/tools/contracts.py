@@ -119,6 +119,26 @@ class RunMdSimulationInput(BaseModel):
         True, description="also write INCAR + KPOINTS for VASP-MD handoff")
 
 
+# ── 5.7 compute_elastic_tensor ────────────────────────────────────────────────
+
+class ComputeElasticInput(BaseModel):
+    poscar_name: Optional[str] = Field(
+        None, description="session structure to use (auto-detects POSCAR if omitted)")
+    material_id: Optional[str] = Field(
+        None, description="optional: use a database structure instead of a session file")
+    source: Optional[str] = Field(
+        None, description='"mp" | "c2db" | "oqmd" (paired with material_id)')
+    fmax: float = Field(
+        0.01, description="force convergence threshold [eV/Å] for the relaxations")
+    max_steps: int = Field(
+        300, ge=1, le=settings.max_opt_steps,
+        description="max optimizer steps per relaxation")
+    calculator_type: str = Field("mace", description=_CALC_TYPE_DESC)
+    calculator_model: Optional[str] = Field(None, description=_CALC_MODEL_DESC)
+    emit_vasp_inputs: bool = Field(
+        True, description="also write a VASP elastic INCAR + KPOINTS for DFT handoff")
+
+
 # ── 14.5 generate_poscar ──────────────────────────────────────────────────────
 
 class GeneratePoscarInput(BaseModel):

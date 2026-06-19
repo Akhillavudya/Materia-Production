@@ -1096,3 +1096,61 @@ def run_md_simulation(
         result["calculator"] = calc_cfg
         result["message"] = f"{result['message']} Using {_calc_label(calc_cfg)}."
     return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TOOL — compute_elastic_tensor  (Step 5.7)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def compute_elastic_tensor(
+    poscar_name:      Optional[str] = None,
+    material_id:      Optional[str] = None,
+    source:           Optional[str] = None,
+    fmax:             float         = 0.01,
+    max_steps:        int           = 300,
+    calculator_type:  str           = "mace",
+    calculator_model: Optional[str] = None,
+    emit_vasp_inputs: bool          = True,
+) -> dict:
+    """Queue an elastic-tensor / mechanical-properties job (K, G, E, ν, Pugh, AU).
+
+    Relaxes the cell, then strains it to read the 6×6 elastic tensor via the ML
+    potential. Detects 2D materials and reports in-plane 2D moduli (N/m). Long-
+    running, so this enqueues a job and returns a ``job_id`` immediately.
+    """
+    fmax      = max(float(fmax), 0.001)
+    max_steps = min(max(int(max_steps), 1), settings.max_opt_steps)
+
+    # Optionally materialize a database structure as the active POSCAR first.
+    if material_id:
+        try:
+            structure = _resolve_structure(material_id, source, None)
+            write_poscar(structure, session_dir(), name=structure.composition.reduced_formula)
+        except _StructureError as e:
+            return {"status": "error", "message": str(e)}
+
+    try:
+        poscar_path = find_structure_in_session(poscar_name, prefer_contcar=False)
+    except FileNotFoundError as e:
+        return {"status": "error", "message": str(e)}
+
+    too_big = _enforce_atom_cap(poscar_path)
+    if too_big:
+        return too_big
+
+    calc_cfg = _resolve_calculator(calculator_type, calculator_model)
+    if calc_cfg.get("status") == "error":
+        return calc_cfg
+
+    result = _enqueue_job(
+        JobType.ELASTIC,
+        poscar_path=poscar_path,
+        output_dir=session_path() / "elastic",
+        params={"fmax": fmax, "max_steps": max_steps},
+        calculator=calc_cfg,
+        emit_vasp_inputs=emit_vasp_inputs,
+    )
+    if result.get("status") == "queued":
+        result["calculator"] = calc_cfg
+        result["message"] = f"{result['message']} Using {_calc_label(calc_cfg)}."
+    return result

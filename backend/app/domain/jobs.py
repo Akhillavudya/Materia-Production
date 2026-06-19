@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 class JobType(str, Enum):
     OPTIMIZE = "optimize"
     MD = "md"
+    ELASTIC = "elastic"
 
 
 class JobStatus(str, Enum):

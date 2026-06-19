@@ -24,6 +24,7 @@ _ARTIFACT_KIND = {
     "trajectory_xyz": "trajectory", "energy_csv": "data", "temp_csv": "data",
     "log": "log", "incar": "vasp", "kpoints": "vasp",
     "plot_energy": "plot", "plot_temp": "plot",
+    "elastic_tensor_csv": "data", "stress_csv": "data", "mechanical_json": "data",
 }
 
 
@@ -86,7 +87,7 @@ def _run(job_id: str, job_type: JobType) -> None:
                 generate_vasp_inputs=spec.get("emit_vasp_inputs", True),
                 progress_callback=reporter,
             )
-        else:
+        elif job_type is JobType.MD:
             from app.services.simulation.md import run_md
             result = run_md(
                 poscar_path=spec["poscar_path"],
@@ -103,6 +104,21 @@ def _run(job_id: str, job_type: JobType) -> None:
                 progress_callback=reporter,
             )
             _attach_md_plots(result, spec["output_dir"])
+        elif job_type is JobType.ELASTIC:
+            from app.services.simulation.elastic import run_elastic
+            result = run_elastic(
+                poscar_path=spec["poscar_path"],
+                output_dir=spec["output_dir"],
+                fmax=params.get("fmax", 0.01),
+                strains=params.get("strains"),
+                max_steps=params.get("max_steps", 300),
+                symprec=params.get("symprec", 0.01),
+                calculator=calc,
+                generate_vasp_inputs=spec.get("emit_vasp_inputs", True),
+                progress_callback=reporter,
+            )
+        else:
+            raise ValueError(f"Unknown job type: {job_type}")
     except Exception as exc:  # noqa: BLE001 — any failure → job failed, not a crash
         logger.exception("Job %s crashed", job_id)
         store.mark_failed(job_id, str(exc))
@@ -141,3 +157,8 @@ def run_optimize_job(self, job_id: str) -> None:   # noqa: ARG001 (celery self)
 @celery_app.task(name="jobs.md", bind=True)
 def run_md_job(self, job_id: str) -> None:          # noqa: ARG001
     _run(job_id, JobType.MD)
+
+
+@celery_app.task(name="jobs.elastic", bind=True)
+def run_elastic_job(self, job_id: str) -> None:     # noqa: ARG001
+    _run(job_id, JobType.ELASTIC)
