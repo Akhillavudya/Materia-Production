@@ -28,7 +28,7 @@ from app.domain.vasp import CellRelax, VaspTask
 from app.jobs import store
 from app.jobs.queue import enqueue
 from app.services.search import MaterialQuery, search_service
-from app.services.structure import builder
+from app.services.structure import activation, builder
 from app.services.simulation.calculator_factory import (
     DEFAULT_MACE_MODEL,
     DEFAULT_MATTERSIM_MODEL,
@@ -816,7 +816,7 @@ def create_interstitial(
 # File-classification helper (shared by read_file + list_files)
 # ─────────────────────────────────────────────────────────────────────────────
 
-_STRUCTURE_EXTS = {".cif", ".xyz", ".vasp"}
+_STRUCTURE_EXTS = activation.STRUCTURE_EXTS   # shared widened set (Phase E)
 _MAX_PREVIEW_CHARS = 4000
 
 
@@ -852,39 +852,21 @@ def _classify_file(path: Path) -> str:
         return "Log file"
     if suffix == ".png":
         return "Plot image"
+    if activation.is_structure_file(name):
+        return "Crystal structure"
     return "File"
 
 
 def _is_structure_file(path: Path) -> bool:
-    upper = path.name.upper()
-    return (
-        upper.startswith(("POSCAR", "CONTCAR"))
-        or path.suffix.lower() in _STRUCTURE_EXTS
-    )
+    return activation.is_structure_file(path.name)
 
 
 def _parse_structure(path: Path):
-    """Parse a structure file with pymatgen, falling back to ASE for XYZ/etc."""
+    """Parse a structure file (pymatgen → ASE fallback) via the shared service."""
     try:
-        from pymatgen.core import Structure
-    except ImportError:
-        raise _StructureError("pymatgen is required. Run: pip install pymatgen")
-
-    try:
-        return Structure.from_file(str(path))
-    except Exception:  # noqa: BLE001 — try ASE before giving up
-        pass
-
-    try:
-        from ase.io import read as ase_read
-        from pymatgen.io.ase import AseAtomsAdaptor
-        atoms = ase_read(str(path))
-        return AseAtomsAdaptor.get_structure(atoms)
-    except Exception as e:  # noqa: BLE001
-        raise _StructureError(
-            f"Could not parse a crystal structure from '{path.name}': {e}. "
-            "A periodic cell is required (XYZ files without a lattice are not supported)."
-        )
+        return activation.parse_structure(path)
+    except activation.StructureParseError as e:
+        raise _StructureError(str(e))
 
 
 # ─────────────────────────────────────────────────────────────────────────────

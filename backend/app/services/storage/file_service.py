@@ -17,7 +17,11 @@ ALLOWED_UPLOAD_NAMES = {
     'OUTCAR', 'OSZICAR', 'XDATCAR', 'CHGCAR', 'WAVECAR',
 }
 ALLOWED_UPLOAD_EXTENSIONS = {
-    '.cif', '.xyz', '.txt', '.log', '.json', '.csv',
+    # structure formats (pymatgen/ASE-readable) — U2/U3: .vasp was missing before
+    '.cif', '.xyz', '.vasp', '.poscar', '.contcar', '.cssr',
+    '.pwscf', '.in', '.pdb', '.xsf', '.res', '.gen',
+    # text / data
+    '.txt', '.log', '.json', '.csv',
 }
 # extensions that are always rejected for safety
 BLOCKED_EXTENSIONS = {

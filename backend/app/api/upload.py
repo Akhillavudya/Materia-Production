@@ -16,9 +16,15 @@ from app.repositories import session_repository
 from app.schemas.upload import UploadedFileOut
 from app.services.storage.file_service import (
     STORAGE_ROOT,
+    get_session_dir,
     get_upload_dir,
     is_upload_allowed,
     sanitize_filename,
+)
+from app.services.structure.activation import (
+    StructureParseError,
+    activate_structure,
+    is_structure_file,
 )
 
 router = APIRouter()
@@ -30,7 +36,29 @@ def _too_large(content: bytes) -> bool:
     return len(content) > _MAX_UPLOAD_BYTES
 
 
-@router.post("/sessions/{session_id}/upload", response_model=list[UploadedFileOut])
+def _activate_uploads(session_id: str, items: list[tuple[str, str]]) -> dict:
+    """Auto-activate a freshly-uploaded structure (U1).
+
+    - exactly one structure file  → parse it and write the active POSCAR.
+    - several structure files      → don't guess; ask the user which to activate.
+    - none / unreadable            → just leave them stored (with a reason).
+    `items` are (name, rel_path) pairs for the files that were stored.
+    """
+    structures = [(n, rp) for n, rp in items if is_structure_file(n)]
+    if not structures:
+        return {"status": "none"}
+    if len(structures) > 1:
+        return {"status": "multiple", "candidates": [n for n, _ in structures]}
+
+    name, rel_path = structures[0]
+    try:
+        info = activate_structure(STORAGE_ROOT / rel_path, get_session_dir(session_id))
+        return {"status": "activated", "file": name, **info}
+    except StructureParseError as e:
+        return {"status": "unreadable", "file": name, "error": str(e)}
+
+
+@router.post("/sessions/{session_id}/upload")
 @limiter.limit("30/minute")
 async def upload_files(
     request: Request,
@@ -75,7 +103,8 @@ async def upload_files(
     if not uploaded and errors:
         raise HTTPException(status_code=400, detail=f"Upload failed: {'; '.join(errors)}")
 
-    return uploaded
+    activation = _activate_uploads(session_id, [(u.name, u.rel_path) for u in uploaded])
+    return {"files": uploaded, "activation": activation, "errors": errors}
 
 
 @router.post("/sessions/create-and-upload")
@@ -115,4 +144,6 @@ async def create_session_and_upload(
         })
         await file.close()
 
-    return {"session_id": session.id, "files": uploaded}
+    activation = _activate_uploads(
+        session.id, [(u["name"], u["rel_path"]) for u in uploaded])
+    return {"session_id": session.id, "files": uploaded, "activation": activation}

@@ -174,14 +174,27 @@ Sequenced so shared helpers land first and each phase is independently verifiabl
 - **Verified:** `vite build` succeeds (exit 0); badge logic keys off exact name
   `POSCAR`.
 
-### Phase E — Upload front door (U1, U2, U3)
-- U3: add `.vasp` to `ALLOWED_UPLOAD_EXTENSIONS`.
-- U2: widen the allow-list to pymatgen/ASE-readable structure formats.
-- U1: on upload, auto-activate a single structure (shared activation service,
-  reused by `read_file`); if multiple structures, **ask the user** which to
-  activate; non-structure files just stored; unreadable files stored + warned.
-- **Verify:** upload a `.cif`/`.vasp` → instantly active; upload 3 structures →
-  prompt to choose.
+### Phase E — Upload front door (U1, U2, U3) — ✅ DONE 2026-06-19
+- New shared service `services/structure/activation.py`: `STRUCTURE_EXTS`,
+  `is_structure_file`, `parse_structure` (pymatgen→ASE), `activate_structure`
+  (parse + write active POSCAR). `material_tools` now delegates its
+  `_parse_structure`/`_is_structure_file`/`_STRUCTURE_EXTS` to it (no dup; widened
+  formats flow to `read_file` and `list_files` too).
+- U3/U2: `ALLOWED_UPLOAD_EXTENSIONS` widened — `.vasp` (was rejected!), `.poscar`,
+  `.contcar`, `.cssr`, `.pwscf`, `.in`, `.pdb`, `.xsf`, `.res`, `.gen` added.
+  `UploadButton` accept list widened to match.
+- U1: both upload endpoints now run `_activate_uploads` after storing —
+  one structure → activate it (return `{activated, formula, n_sites}`); several →
+  `{multiple, candidates}` (don't guess); none → `{none}`; unparseable →
+  `{unreadable, error}`. Endpoints now return `{files, activation[, errors]}`.
+- Frontend: `UploadButton` threads `activation` through; `Chat.handleUploadDone`
+  renders it — "**SiO2** (12 atoms) is now the active structure…", or "You
+  uploaded 3 structures (…). **Which one should I make active?**", or a parse
+  warning. (Answering routes to `read_file` which activates the named file.)
+- **Verified:** `is_structure_file` recognition (`.vasp` now true) on host;
+  in-container real-code test of parse/activate + the 4 `_activate_uploads`
+  branches (single/multiple/none/unreadable); backend `py_compile` + `vite build`
+  both clean.
 
 ### Phase F — Optimize/MD outputs (O1, O2, M1, M3) + BS3/BS4
 - O1: optimize convergence plot (energy + fmax vs step).

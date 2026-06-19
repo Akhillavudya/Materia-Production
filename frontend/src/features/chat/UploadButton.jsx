@@ -3,11 +3,12 @@ import { uploadFiles, createSessionAndUpload } from '../../api'
 
 // ── which file types the browser file picker will accept ─────────────────────
 const ACCEPT = [
-  // VASP files — no extension, listed by name in the input accept attribute
-  // browsers don't support filtering by name, so we use a broad accept
-  // and validate on the backend
-  '.cif', '.xyz', '.txt', '.log', '.json', '.csv',
-  // no extension files (POSCAR, INCAR, etc.) — user picks these manually
+  // structure formats (validated on the backend)
+  '.cif', '.xyz', '.vasp', '.poscar', '.contcar', '.cssr',
+  '.pwscf', '.in', '.pdb', '.xsf', '.res', '.gen',
+  // text / data
+  '.txt', '.log', '.json', '.csv',
+  // no-extension files (POSCAR, INCAR, etc.) — user picks these manually
 ].join(',')
 
 export default function UploadButton({
@@ -32,20 +33,24 @@ export default function UploadButton({
     try {
       let sid = sessionId
       let uploadedFiles
+      let activation
 
       if (sid) {
         // existing session — upload directly
-        uploadedFiles = await uploadFiles(sid, files)
+        const res    = await uploadFiles(sid, files)
+        uploadedFiles = res.files
+        activation    = res.activation
       } else {
         // no session yet — create one then upload
         const result = await createSessionAndUpload(files)
         sid           = result.session_id
         uploadedFiles = result.files
+        activation    = result.activation
         onSessionCreated?.(sid)
       }
 
       setStatus('done')
-      onUploadDone?.(sid, uploadedFiles)
+      onUploadDone?.(sid, uploadedFiles, activation)
 
       // clear status after 2 seconds
       setTimeout(() => setStatus(null), 2000)

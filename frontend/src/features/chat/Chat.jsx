@@ -326,25 +326,35 @@ export default function Chat({
     }
   }
 
-  function handleUploadDone(sid, uploadedFiles) {
+  function handleUploadDone(sid, uploadedFiles, activation) {
     onFilesGenerated?.()
     if (sid !== sessionId) onSessionCreated?.(sid)
 
     if (uploadedFiles && uploadedFiles.length > 0) {
       const names = uploadedFiles.map(f => f.name).join(', ')
-      const isPostcar = uploadedFiles.some(f =>
-        ['POSCAR', 'CONTCAR'].includes(f.name.toUpperCase()) ||
-        f.name.toUpperCase().startsWith('POSCAR_') ||
-        f.name.toLowerCase().endsWith('.cif') ||
-        f.name.toLowerCase().endsWith('.xyz')
-      )
-      const confirmMsg = isPostcar
-        ? `✓ Uploaded: **${names}**\n\nYou can now generate VASP inputs, create supercells, add defects, or run an MLP simulation from this structure.`
-        : `✓ Uploaded: **${names}**`
+
+      // Phase E (U1): the backend tells us what it did with the structure(s).
+      let tail = ''
+      switch (activation?.status) {
+        case 'activated':
+          tail = `\n\n**${activation.formula}** (${activation.n_sites} atoms) is now the active structure. ` +
+                 `You can generate VASP inputs, build supercells, add defects, or run an MLP simulation.`
+          break
+        case 'multiple':
+          tail = `\n\nYou uploaded ${activation.candidates.length} structures ` +
+                 `(${activation.candidates.join(', ')}). **Which one should I make active?**`
+          break
+        case 'unreadable':
+          tail = `\n\nI couldn't parse **${activation.file}** as a crystal structure, so nothing was activated. ` +
+                 `${activation.error || ''}`
+          break
+        default:
+          tail = ''
+      }
 
       setMessages(prev => [
         ...prev,
-        { ...blankAssistant(), content: confirmMsg },
+        { ...blankAssistant(), content: `✓ Uploaded: **${names}**${tail}` },
       ])
     }
   }
