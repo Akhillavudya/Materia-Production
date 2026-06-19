@@ -17,7 +17,9 @@ Outputs per run
   optimization.log — ASE optimizer log (step, fmax, energy)
   trajectory.traj  — full ASE trajectory (readable by 3Dmol via xyz conversion)
   trajectory.xyz   — multi-frame XYZ (for 3Dmol.js scrubber)
-  energy.csv       — step, energy_eV, fmax_eV_A columns
+  opt_energy.csv   — step, energy_eV, fmax_eV_A columns
+  results.json     — summary: converged?, final/per-atom energy, max force, steps
+  opt_convergence.png — energy + fmax vs step (added by the job runner)
   INCAR            — VASP INCAR (if generate_vasp_inputs=True)
   KPOINTS          — VASP KPOINTS (if generate_vasp_inputs=True)
 
@@ -39,6 +41,7 @@ Usage
 
 import os
 import csv
+import json
 import time
 from pathlib import Path
 from typing import Callable, Optional
@@ -134,7 +137,7 @@ def run_optimization(
     log_path       = out_dir / "optimization.log"
     traj_path      = out_dir / "trajectory.traj"
     xyz_path       = out_dir / "trajectory.xyz"
-    csv_path       = out_dir / "energy.csv"
+    csv_path       = out_dir / "opt_energy.csv"   # N1: consistent with md_energy.csv
 
     # ── 4. Wrap atoms for cell relaxation ─────────────────────────────────────
     opt_atoms = _wrap_for_cell_relax(atoms, cell_relax.lower().strip())
@@ -230,6 +233,29 @@ def run_optimization(
     steps        = len(energy_log)
     final_energy = energy_log[-1]["energy_eV"] if energy_log else None
     final_fmax   = energy_log[-1]["fmax_eV_A"] if energy_log else None
+    n_sites      = len(final_atoms)
+
+    # ── 13b. results.json — the at-a-glance summary (O2) ──────────────────────
+    results_path = out_dir / "results.json"
+    try:
+        summary = {
+            "converged":          bool(converged),
+            "steps":              steps,
+            "final_energy_eV":    final_energy,
+            "energy_per_atom_eV": (round(final_energy / n_sites, 6)
+                                   if final_energy is not None and n_sites else None),
+            "max_force_eV_A":     final_fmax,
+            "fmax_target_eV_A":   fmax,
+            "formula":            formula,
+            "n_sites":            n_sites,
+            "cell_relax":         cell_relax,
+            "optimizer":          optimizer,
+            "calculator":         calc_cfg,
+            "elapsed_s":          elapsed,
+        }
+        results_path.write_text(json.dumps(summary, indent=2))
+    except Exception:
+        results_path = None
 
     if cancelled:
         status = "cancelled"
@@ -256,7 +282,7 @@ def run_optimization(
         "final_energy": final_energy,
         "final_fmax":   final_fmax,
         "formula":      formula,
-        "n_sites":      len(final_atoms),
+        "n_sites":      n_sites,
         "elapsed_s":    elapsed,
         "cell_relax":   cell_relax,
         "optimizer":    optimizer,
@@ -267,6 +293,7 @@ def run_optimization(
             "trajectory_traj":  str(traj_path),
             "trajectory_xyz":   str(xyz_path)   if xyz_path   else None,
             "energy_csv":       str(csv_path)   if csv_path   else None,
+            "results_json":     str(results_path) if results_path else None,
             "incar":            str(incar_path)  if incar_path  else None,
             "kpoints":          str(kpoints_path) if kpoints_path else None,
         },

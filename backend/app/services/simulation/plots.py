@@ -152,6 +152,69 @@ def generate_md_plots(
     }
 
 
+def generate_optimization_plot(
+    energy_csv: str,
+    output_dir: str,
+    fmax_target: Optional[float] = None,
+    title:       Optional[str]   = None,
+) -> dict:
+    """Plot the relaxation convergence: energy and fmax vs optimizer step (O1).
+
+    Reads ``opt_energy.csv`` (columns: step, energy_eV, fmax_eV_A) and writes
+    ``opt_convergence.png`` — a 2-panel figure (energy on top, fmax below on a log
+    axis with the convergence threshold marked). Returns {status, convergence_png}.
+    """
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return {"status": "error", "message": "matplotlib not installed",
+                "convergence_png": None}
+
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    e_data = _read_csv(energy_csv, x_col="step", y_col="energy_eV")
+    f_data = _read_csv(energy_csv, x_col="step", y_col="fmax_eV_A")
+    if not e_data["x"]:
+        return {"status": "error", "message": "energy CSV empty or missing",
+                "convergence_png": None}
+
+    _apply_style(plt)
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6), sharex=True)
+
+    ax1.plot(e_data["x"], e_data["y"], color="#2563EB", linewidth=1.4, marker="o",
+             markersize=2.5, label="E (eV)")
+    ax1.set_ylabel("Energy (eV)", fontsize=11)
+    ax1.set_title(f"{title + ' — ' if title else ''}Relaxation convergence", fontsize=12)
+    ax1.legend(fontsize=9, framealpha=0.6)
+    ax1.grid(True, linestyle=":", alpha=0.5)
+    _tight_ylim(ax1, e_data["y"])
+
+    if f_data["y"]:
+        ax2.plot(f_data["x"], f_data["y"], color="#DC2626", linewidth=1.4,
+                 marker="o", markersize=2.5, label="max force (eV/Å)")
+        try:
+            ax2.set_yscale("log")
+        except Exception:
+            pass
+    if fmax_target:
+        ax2.axhline(y=fmax_target, color="#EA580C", linewidth=1.5, linestyle="-.",
+                    label=f"target {fmax_target:g} eV/Å", alpha=0.85)
+    ax2.set_xlabel("Optimizer step", fontsize=11)
+    ax2.set_ylabel("Max force (eV/Å)", fontsize=11)
+    ax2.legend(fontsize=9, framealpha=0.6)
+    ax2.grid(True, which="both", linestyle=":", alpha=0.5)
+
+    fig.tight_layout()
+    png = str(out_dir / "opt_convergence.png")
+    fig.savefig(png, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return {"status": "ok", "convergence_png": png,
+            "convergence_b64": _to_b64(png)}
+
+
 # ── Private: plot helpers ─────────────────────────────────────────────────────
 
 def _plot_energy(ax, data: dict, title: Optional[str] = None):

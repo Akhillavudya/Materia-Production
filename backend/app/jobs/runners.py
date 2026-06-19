@@ -23,7 +23,8 @@ _ARTIFACT_KIND = {
     "contcar": "structure", "trajectory_traj": "trajectory",
     "trajectory_xyz": "trajectory", "energy_csv": "data", "temp_csv": "data",
     "log": "log", "incar": "vasp", "kpoints": "vasp",
-    "plot_energy": "plot", "plot_temp": "plot",
+    "results_json": "data", "plot_energy": "plot", "plot_temp": "plot",
+    "plot_convergence": "plot",
     "elastic_tensor_csv": "data", "stress_csv": "data", "mechanical_json": "data",
     "phonon_plot": "plot", "phonopy_yaml": "data", "band_csv": "data", "dos_csv": "data",
     "bestsqs_out": "data", "rndstr_in": "data", "sqscell_out": "data",
@@ -88,9 +89,11 @@ def _run(job_id: str, job_type: JobType) -> None:
                 optimizer=params.get("optimizer", "FIRE"),
                 max_steps=params.get("max_steps", 1000),
                 calculator=calc,
-                generate_vasp_inputs=spec.get("emit_vasp_inputs", True),
+                generate_vasp_inputs=spec.get("emit_vasp_inputs", False),
                 progress_callback=reporter,
             )
+            _attach_opt_plot(result, spec["output_dir"],
+                             fmax_target=params.get("fmax", 0.02))
         elif job_type is JobType.MD:
             from app.services.simulation.md import run_md
             result = run_md(
@@ -155,6 +158,22 @@ def _run(job_id: str, job_type: JobType) -> None:
 
     _finalize(job_id, result)
     reporter.publish({"type": "done", "status": store.get_status(job_id)})
+
+
+def _attach_opt_plot(result: dict, output_dir: str, fmax_target: float | None = None) -> None:
+    """Generate the relaxation convergence plot and add it to result['files'] (O1)."""
+    try:
+        from app.services.simulation.plots import generate_optimization_plot
+        out = Path(output_dir)
+        plot = generate_optimization_plot(
+            energy_csv=str(out / "opt_energy.csv"),
+            output_dir=str(out),
+            fmax_target=fmax_target,
+        )
+        if plot.get("convergence_png"):
+            result.setdefault("files", {})["plot_convergence"] = plot["convergence_png"]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Optimization plot generation failed: %s", exc)
 
 
 def _attach_md_plots(result: dict, output_dir: str) -> None:

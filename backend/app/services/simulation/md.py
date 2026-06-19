@@ -17,6 +17,7 @@ Outputs per run
   md.log           — step, time_fs, energy_eV, temperature_K, [pressure_GPa]
   md_energy.csv    — step, time_fs, energy_eV
   md_temp.csv      — step, time_fs, temperature_K
+  results.json     — summary: mean/std T, energy drift per atom, final E/volume
   CONTCAR          — final structure in VASP POSCAR format
   INCAR            — VASP INCAR for equivalent VASP-MD run
   KPOINTS          — VASP KPOINTS
@@ -38,6 +39,7 @@ Usage
 """
 
 import csv
+import json
 import time
 from pathlib import Path
 from typing import Callable, Optional
@@ -249,17 +251,62 @@ def run_md(
         except Exception as e:
             print(f"[MD] VASP input warning: {e}")
 
-    # ── 11. Summary stats ─────────────────────────────────────────────────────
+    # ── 11. Summary stats + conservation signal (M1) ──────────────────────────
     import statistics
-    mean_T    = statistics.mean(r["temperature_K"] for r in temp_log) if temp_log else None
-    final_E   = energy_log[-1]["energy_eV"] if energy_log else None
+    n_atoms   = len(atoms)
+    temps     = [r["temperature_K"] for r in temp_log]
+    energies  = [r["energy_eV"] for r in energy_log]
+    mean_T    = statistics.mean(temps) if temps else None
+    T_std     = statistics.pstdev(temps) if len(temps) > 1 else 0.0
+    mean_E    = statistics.mean(energies) if energies else None
+    E_std     = statistics.pstdev(energies) if len(energies) > 1 else 0.0
+    final_E   = energies[-1] if energies else None
     total_fs  = steps_done * timestep
 
+    # Energy drift per atom — the key signal for "was this MD stable?". Compares
+    # the mean of the first vs last ~10% of the run; near-zero = well conserved.
+    drift_per_atom = None
+    if len(energies) >= 4 and n_atoms:
+        k = max(1, len(energies) // 10)
+        drift_per_atom = round(
+            (statistics.mean(energies[-k:]) - statistics.mean(energies[:k])) / n_atoms, 6)
+
+    final_volume = None
+    try:
+        final_volume = round(atoms.get_volume(), 3)
+    except Exception:  # noqa: BLE001
+        pass
+
+    # ── 11b. results.json — at-a-glance summary (M3) ──────────────────────────
+    results_path = out_dir / "results.json"
+    try:
+        summary = {
+            "ensemble":                 ensemble,
+            "thermostat":               thermostat,
+            "temperature_target_K":     temperature_K,
+            "mean_temperature_K":       round(mean_T, 2) if mean_T is not None else None,
+            "temperature_std_K":        round(T_std, 2),
+            "mean_energy_eV":           round(mean_E, 6) if mean_E is not None else None,
+            "energy_std_eV":            round(E_std, 6),
+            "energy_drift_per_atom_eV": drift_per_atom,
+            "final_energy_eV":          final_E,
+            "final_volume_A3":          final_volume,
+            "steps_completed":          steps_done,
+            "total_time_fs":            total_fs,
+            "formula":                  formula,
+            "n_sites":                  n_atoms,
+            "calculator":               calc_cfg,
+        }
+        results_path.write_text(json.dumps(summary, indent=2))
+    except Exception:  # noqa: BLE001
+        results_path = None
+
     verb = "was cancelled after" if cancelled else "completed"
+    drift_str = (f", E drift/atom = {drift_per_atom:+g} eV" if drift_per_atom is not None else "")
     message = (
         f"MD ({ensemble.upper()}) {verb} {steps_done} steps "
         f"({total_fs:.1f} fs) at {temperature_K} K. "
-        f"Mean T = {mean_T:.1f} K, Final E = {final_E} eV. "
+        f"Mean T = {mean_T:.1f} K (±{T_std:.1f}){drift_str}, Final E = {final_E} eV. "
         f"Wall time: {elapsed}s."
     )
     print(f"[MD] {message}")
@@ -273,6 +320,9 @@ def run_md(
         "n_sites":           len(atoms),
         "final_energy":      final_E,
         "mean_temperature":  round(mean_T, 2) if mean_T else None,
+        "temperature_std":   round(T_std, 2),
+        "energy_drift_per_atom": drift_per_atom,
+        "final_volume_A3":   final_volume,
         "ensemble":          ensemble,
         "thermostat":        thermostat,
         "calculator":        calc_cfg,
@@ -283,6 +333,7 @@ def run_md(
             "log":             str(log_path),
             "energy_csv":      str(energy_csv_path)  if energy_csv_path  else None,
             "temp_csv":        str(temp_csv_path)    if temp_csv_path    else None,
+            "results_json":    str(results_path)     if results_path     else None,
             "contcar":         str(contcar_path),
             "incar":           str(incar_path)        if incar_path        else None,
             "kpoints":         str(kpoints_path)      if kpoints_path      else None,

@@ -512,6 +512,29 @@ def _build_tag(operation: str, *, scaling=None, axis=None, miller=None):
     return None
 
 
+def _predicted_supercell_atoms(n_atoms: int, scaling) -> Optional[int]:
+    """Atoms a supercell *would* have, for a pre-build cap check (BS3). None if unparsable."""
+    try:
+        nums = [int(v) for v in str(scaling or "").replace(",", " ").split()]
+    except ValueError:
+        return None
+    if len(nums) == 1:
+        nums = nums * 3
+    if len(nums) != 3 or any(v < 1 for v in nums):
+        return None
+    return n_atoms * nums[0] * nums[1] * nums[2]
+
+
+def _ignored_param_warnings(op: str, *, scaling, miller) -> list[str]:
+    """Warn when a param that doesn't apply to `op` was supplied (BS4)."""
+    warns: list[str] = []
+    if scaling and op != "make_supercell":
+        warns.append(f"`scaling` only applies to make_supercell — ignored for {op}.")
+    if str(miller or "").strip() not in ("", "1 1 1") and op != "make_slab":
+        warns.append(f"`miller` only applies to make_slab — ignored for {op}.")
+    return warns
+
+
 def _resolve_build_input(material_id, source, poscar_path):
     """Resolve the structure to transform: a database id, or the active session POSCAR."""
     if material_id:
@@ -599,6 +622,16 @@ def build_structure(
         return _convert_structure(structure, to_format)
 
     n_before = len(structure)
+    warnings = _ignored_param_warnings(op, scaling=scaling, miller=miller)   # BS4
+
+    # BS3: reject an oversized supercell BEFORE building it (cheap + deterministic).
+    if op == "make_supercell":
+        predicted = _predicted_supercell_atoms(n_before, scaling)
+        if predicted and predicted > settings.max_atoms:
+            return {"status": "error",
+                    "message": (f"A '{scaling}' supercell of this {n_before}-atom cell "
+                                f"would be {predicted} atoms, above the "
+                                f"{settings.max_atoms}-atom limit. Use a smaller scaling.")}
 
     try:
         if op == "make_supercell":
@@ -640,6 +673,7 @@ def build_structure(
     else:  # pragma: no cover
         detail = f"now has {len(result)} atoms"
 
+    warn_note = f" Note: {' '.join(warnings)}" if warnings else ""
     return {
         "status":         "success",
         "operation":      op,
@@ -648,9 +682,10 @@ def build_structure(
         "n_sites":        len(result),
         "lattice_abc":    abc,
         "files_written":  wp["files_written"],
+        "warnings":       warnings,
         "message": (
             f"{op}: {formula} {detail}. "
-            f"Wrote {wp['files_written'][-1]} (active as POSCAR) for the next step."
+            f"Wrote {wp['files_written'][-1]} (active as POSCAR) for the next step.{warn_note}"
         ),
     }
 
