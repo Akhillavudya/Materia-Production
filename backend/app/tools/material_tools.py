@@ -953,6 +953,35 @@ def _read_structure_file(path: Path) -> dict:
         return {"status": "error", "message": str(e)}
 
     formula = structure.composition.reduced_formula
+
+    # Disordered structures (partial occupancies) can't be a POSCAR; keep them as a
+    # .cif so generate_sqs can consume them. (Optimize/MD/VASP need an ordered cell.)
+    if not structure.is_ordered:
+        try:
+            from pymatgen.io.cif import CifWriter
+            out = session_dir() / f"{formula}_disordered.cif"
+            CifWriter(structure).write_file(str(out))
+        except Exception as e:  # noqa: BLE001
+            return {"status": "error", "message": f"Could not activate structure: {e}"}
+        return {
+            "status":        "success",
+            "file_type":     "structure",
+            "source_file":   path.name,
+            "formula":       formula,
+            "n_sites":       len(structure),
+            "lattice_a":     round(structure.lattice.a, 4),
+            "lattice_b":     round(structure.lattice.b, 4),
+            "lattice_c":     round(structure.lattice.c, 4),
+            "elements":      [str(e) for e in structure.composition.elements],
+            "disordered":    True,
+            "files_written": [out.name],
+            "message": (
+                f"Read {path.name}: {formula} ({len(structure)} atoms), a DISORDERED "
+                f"structure (partial occupancies). Saved as {out.name} — ready for "
+                "generate_sqs. (Optimization/MD/VASP need an ordered structure.)"
+            ),
+        }
+
     try:
         wp = write_poscar(structure, session_dir(), name=formula)
     except Exception as e:  # noqa: BLE001
@@ -968,6 +997,7 @@ def _read_structure_file(path: Path) -> dict:
         "lattice_b":     round(structure.lattice.b, 4),
         "lattice_c":     round(structure.lattice.c, 4),
         "elements":      [str(e) for e in structure.composition.elements],
+        "disordered":    False,
         "files_written": wp["files_written"],
         "message": (
             f"Read {path.name}: {formula} ({len(structure)} atoms). Wrote POSCAR — "
@@ -1392,7 +1422,18 @@ def generate_sqs(
     time_budget_s = max(int(time_budget_s), 30)
 
     try:
-        cif_path = find_structure_in_session(cif_name, prefer_contcar=False)
+        if cif_name:
+            cif_path = find_structure_in_session(cif_name, prefer_contcar=False)
+        else:
+            # SQS needs a DISORDERED structure; POSCARs are always ordered, so prefer
+            # a .cif (a *_disordered.cif from activation first) over the default resolver.
+            base = session_path()
+            cifs = sorted([p for p in base.rglob("*.cif") if p.is_file()],
+                          key=lambda p: p.stat().st_mtime, reverse=True)
+            disordered = [p for p in cifs if p.name.endswith("_disordered.cif")]
+            chosen = disordered or cifs
+            cif_path = chosen[0] if chosen else find_structure_in_session(
+                None, prefer_contcar=False)
     except FileNotFoundError as e:
         return {"status": "error", "message": str(e)}
 

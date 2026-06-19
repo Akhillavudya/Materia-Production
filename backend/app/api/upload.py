@@ -56,6 +56,8 @@ def _activate_uploads(session_id: str, items: list[tuple[str, str]]) -> dict:
         return {"status": "activated", "file": name, **info}
     except StructureParseError as e:
         return {"status": "unreadable", "file": name, "error": str(e)}
+    except Exception as e:  # noqa: BLE001 — never let activation 500 the upload
+        return {"status": "unreadable", "file": name, "error": str(e)}
 
 
 @router.post("/sessions/{session_id}/upload")

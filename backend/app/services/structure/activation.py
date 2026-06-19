@@ -58,14 +58,25 @@ def parse_structure(path: Path):
 
 
 def activate_structure(path: Path, dest_dir: Path) -> dict:
-    """Parse `path` and write it as the active ``POSCAR`` in `dest_dir`.
+    """Parse `path` and write it as the active structure in `dest_dir`.
 
-    Returns ``{formula, n_sites}`` on success; raises ``StructureParseError`` if the
-    file can't be parsed.
+    Ordered structures are written as a canonical ``POSCAR`` (so optimize / MD /
+    VASP pick them up). Disordered structures (partial site occupancies) CANNOT be
+    a POSCAR, so they are kept as a ``.cif`` instead — this is what ``generate_sqs``
+    consumes. Returns ``{formula, n_sites, disordered}``; raises
+    ``StructureParseError`` if the file can't be parsed.
     """
     from app.services.vasp.poscar import write_poscar
 
     structure = parse_structure(path)
     formula = structure.composition.reduced_formula
+
+    if not structure.is_ordered:
+        from pymatgen.io.cif import CifWriter
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        out = dest_dir / f"{formula}_disordered.cif"
+        CifWriter(structure).write_file(str(out))
+        return {"formula": formula, "n_sites": len(structure), "disordered": True}
+
     write_poscar(structure, dest_dir, name=formula)
-    return {"formula": formula, "n_sites": len(structure)}
+    return {"formula": formula, "n_sites": len(structure), "disordered": False}
