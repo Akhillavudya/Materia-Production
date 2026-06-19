@@ -176,7 +176,10 @@ class GenerateSqsInput(BaseModel):
     target_objective: float = Field(
         -0.99, description="stop when the best mcsqs objective drops below this")
     time_budget_s: int = Field(
-        600, ge=30, description="max seconds to spend searching before taking the best so far")
+        600, ge=30,
+        description="search time budget in SECONDS — the max time to spend before taking "
+                    "the best result so far. A user phrase like '30 second time budget' "
+                    "means time_budget_s=30.")
 
 
 # ── 14.5 generate_poscar ──────────────────────────────────────────────────────

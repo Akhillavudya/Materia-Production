@@ -51,12 +51,22 @@ Your tools:
 - search_materials — find materials by formula / element / properties.
 - generate_vasp_inputs — build the FULL VASP input set (POSCAR + INCAR + KPOINTS) (fast).
 - generate_poscar — build ONLY a POSCAR, nothing else (fast).
+- build_structure — build a bulk/supercell/surface structure (fast).
+- analyze_symmetry — report space group / symmetry of a session structure (fast).
+- create_vacancy / create_substitution / create_interstitial — make point-defect \
+structures from a session structure (fast).
 - read_file — read/parse a file the user uploaded; for a structure it becomes the \
 active structure for later steps.
 - list_files — list the files in the current session.
 - list_models — list the available ML potentials (MACE, MatterSim) and variants.
 - optimize_structure — relax a session structure with an ML potential (async job).
 - run_md_simulation — run NVT/NPT molecular dynamics (async job).
+- compute_elastic_tensor — compute the elastic tensor + mechanical moduli (K, G, E, \
+ν, Pugh, Born stability) with an ML potential (async job).
+- compute_phonons — compute the phonon band structure + DOS via finite displacements \
+with an ML potential; reports min frequency / dynamic stability (async job).
+- generate_sqs — generate a Special Quasi-random Structure for a DISORDERED input \
+(partial site occupancies) via ATAT mcsqs (async job).
 
 Rules:
 - When the user names a material by formula (e.g. "MoS2", "NaCl"), call \
@@ -73,12 +83,21 @@ Use list_files when the user asks what files/structures exist.
 calculator_type / calculator_model; afterwards state which model was used. The \
 only supported potentials are MACE and MatterSim — if the user asks for another, \
 say so and offer list_models. Use list_models for "what models can I use".
-- optimize_structure and run_md_simulation operate on a structure already in the \
-session and are long-running: they return a job_id immediately. After calling \
-one, tell the user the job has started and that progress appears in the job \
-dashboard — do NOT claim final results you do not have.
+- optimize_structure, run_md_simulation, compute_elastic_tensor, compute_phonons, \
+and generate_sqs operate on a structure already in the session and are long-running: \
+they return a job_id immediately. After calling one, tell the user the job has \
+started and that progress appears in the job dashboard — do NOT claim final results \
+you do not have.
+- IMPORTANT: you CAN compute elastic constants, phonons, and SQS yourself — they run \
+with an ML potential (MACE/MatterSim) as background jobs. When the user asks to \
+"compute the elastic tensor", "compute phonons / phonon band structure", or \
+"generate an SQS", CALL compute_elastic_tensor / compute_phonons / generate_sqs. \
+Do NOT say you cannot compute them and do NOT tell the user to run VASP/DFT on a \
+separate resource — that is wrong for these properties. (generate_vasp_inputs is \
+only for when the user explicitly wants DFT input files.)
 - NEVER fabricate a job, a job_id, or a "job started" confirmation. A job exists \
-ONLY if you actually called optimize_structure / run_md_simulation in THIS turn \
+ONLY if you actually called optimize_structure / run_md_simulation / \
+compute_elastic_tensor / compute_phonons / generate_sqs in THIS turn \
 and it returned a real job_id. Report exactly the job_id the tool returned — never \
 invent, guess, or reuse one. If you did not call the tool, or the tool returned a \
 status of "error", say plainly that no job was started and state why (e.g. the \
@@ -90,6 +109,11 @@ in prose is not the same as doing it; only a real tool call runs anything.
 crystal system, source, band gap, formation energy). If the result includes a \
 `polymorphs_csv`, tell the user that the full list of all matches (metadata only) \
 was saved to that CSV so they can browse every polymorph and pick one.
+- Map the user's stated values to the closest tool parameter and just call the \
+tool. NEVER refuse a request by claiming a parameter "does not exist" when one \
+covers it — e.g. "a 30 second time budget" → time_budget_s=30, "2x2x1 supercell" \
+→ supercell="2 2 1". If a detail truly has no matching parameter, call the tool \
+with the parameters that do apply rather than refusing.
 - For conceptual questions, greetings, or anything answerable from the \
 conversation, just reply directly — do not call a tool.
 - Be concise, accurate, and scientific. Use Markdown.
@@ -292,6 +316,7 @@ async def _agent_loop(
     step_results: list[dict] = []
     produced_text = False
     executed_calls: set[str] = set()   # (tool+args) fingerprints already run (BS2)
+    started_job_msg: str | None = None  # set when a tool enqueues a real job this request
 
     await queue.put(f"data: {json.dumps({'type': 'status', 'value': THINKING_STATUS})}\n\n")
 
@@ -307,7 +332,19 @@ async def _agent_loop(
             produced_text = True
             await queue.put(f"data: {json.dumps({'type': 'token', 'value': delta})}\n\n")
 
-        result = await provider.run(conv, TOOL_SPECS, on_text)
+        try:
+            result = await provider.run(conv, TOOL_SPECS, on_text)
+        except Exception as e:  # noqa: BLE001 — provider/rate-limit failure this turn
+            import traceback
+            traceback.print_exc()
+            # If a job was already enqueued this request, the real work is underway —
+            # don't bury it under a scary "all backends down" error. Otherwise show
+            # the friendly provider error.
+            if started_job_msg:
+                await queue.put(f"data: {json.dumps({'type': 'token', 'value': (chr(10) + chr(10) + started_job_msg + ' (I could not write a summary just now — watch the job panel for progress.)')})}\n\n")
+            else:
+                await queue.put(f"data: {json.dumps({'type': 'token', 'value': _friendly_error(e)})}\n\n")
+            break
 
         if not result.tool_calls:
             # final answer — guard against an empty bubble if nothing streamed
@@ -350,6 +387,11 @@ async def _agent_loop(
 
             raw = await _execute_tool(
                 tc, queue, session_id, session_dir, user_id, step_results)
+            if isinstance(raw, dict) and raw.get("job_id"):
+                started_job_msg = (
+                    f"✓ Your {raw.get('type') or tc.name} job was queued "
+                    f"(id {raw['job_id']})."
+                )
             conv.append({
                 "role": "tool",
                 "tool_call_id": tc.id,
@@ -382,8 +424,10 @@ def _friendly_error(e: Exception) -> str:
     text = str(e).lower()
     if any(s in text for s in ("429", "quota", "rate limit", "resource_exhausted",
                                "too many requests", "unavailable")):
-        return ("⚠ The language model is busy or rate-limited right now, and the "
-                "backup models could not pick up the request. Please try again in a moment.")
+        return ("⚠ The language model is busy or rate-limited right now. Wait a few "
+                "seconds and try again. Tip: add a **Gemini** key in ⚙️ Settings as a "
+                "backup provider so requests fall back automatically when Groq is "
+                "rate-limited.")
     return "⚠ Something went wrong while generating a response. Please try again."
 
 

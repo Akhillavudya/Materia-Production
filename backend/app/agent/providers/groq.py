@@ -99,7 +99,10 @@ class GroqProvider(LLMProvider):
                 "https://console.groq.com/keys) or set MODEL_PROVIDER=gemini|ollama."
             )
 
-        client = AsyncGroq(api_key=key)
+        # max_retries: the SDK retries transient 429/5xx with exponential backoff and
+        # honours the server's Retry-After header, smoothing over free-tier per-minute
+        # bursts before the agent falls back to the next provider.
+        client = AsyncGroq(api_key=key, max_retries=3)
 
         text_acc: list[str] = []
         # Streamed tool calls arrive as deltas keyed by index; the name lands in
