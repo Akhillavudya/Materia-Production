@@ -25,6 +25,7 @@ TASK_NAMES = {
     JobType.OPTIMIZE: "jobs.optimize",
     JobType.MD: "jobs.md",
     JobType.ELASTIC: "jobs.elastic",
+    JobType.PHONON: "jobs.phonon",
 }
 
 celery_app = Celery(
@@ -60,6 +61,7 @@ def _run_inline(job_type: JobType, job_id: str) -> None:
         JobType.OPTIMIZE: runners.run_optimize_job,
         JobType.MD: runners.run_md_job,
         JobType.ELASTIC: runners.run_elastic_job,
+        JobType.PHONON: runners.run_phonon_job,
     }[job_type]
     threading.Thread(target=target, args=(job_id,), daemon=True).start()
     logger.info("Started inline %s job %s (thread)", job_type.value, job_id)

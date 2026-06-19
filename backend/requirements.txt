@@ -52,6 +52,11 @@ e3nn==0.4.4
 numpy
 matplotlib
 
+# ── Phonons (Step 5.7 compute_phonons) ───────────────────────────────────────
+# Finite-displacement phonon band/DOS; seekpath picks the high-symmetry path.
+phonopy
+seekpath
+
 # ── HTTP utilities ───────────────────────────────────────────────────────────
 requests
 

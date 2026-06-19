@@ -1154,3 +1154,90 @@ def compute_elastic_tensor(
         result["calculator"] = calc_cfg
         result["message"] = f"{result['message']} Using {_calc_label(calc_cfg)}."
     return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TOOL — compute_phonons  (Step 5.7)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _parse_supercell(text: str) -> tuple:
+    """Parse "3 3 3" / "2" → a 3-tuple of positive ints (defaults to 3×3×3)."""
+    parts = [p for p in str(text).replace(",", " ").split() if p]
+    if len(parts) == 1:
+        n = max(int(parts[0]), 1)
+        return (n, n, n)
+    if len(parts) == 3:
+        return tuple(max(int(p), 1) for p in parts)
+    raise ValueError(f"Invalid supercell '{text}'. Use '3 3 3' or a single number.")
+
+
+def compute_phonons(
+    poscar_name:      Optional[str] = None,
+    material_id:      Optional[str] = None,
+    source:           Optional[str] = None,
+    supercell:        str           = "3 3 3",
+    disp_distance:    float         = 0.01,
+    mesh:             int           = 20,
+    calculator_type:  str           = "mace",
+    calculator_model: Optional[str] = None,
+) -> dict:
+    """Queue a phonon band-structure + DOS job (finite displacements, ML forces).
+
+    Builds a supercell, displaces atoms, computes forces with the ML potential,
+    and produces a phonon band/DOS plot plus phonopy.yaml. Long-running, so this
+    enqueues a job and returns a ``job_id`` immediately.
+    """
+    try:
+        sc = _parse_supercell(supercell)
+    except ValueError as e:
+        return {"status": "error", "message": str(e)}
+
+    disp_distance = max(float(disp_distance), 0.001)
+    mesh = min(max(int(mesh), 5), 60)
+
+    # Optionally materialize a database structure as the active POSCAR first.
+    if material_id:
+        try:
+            structure = _resolve_structure(material_id, source, None)
+            write_poscar(structure, session_dir(), name=structure.composition.reduced_formula)
+        except _StructureError as e:
+            return {"status": "error", "message": str(e)}
+
+    try:
+        poscar_path = find_structure_in_session(poscar_name, prefer_contcar=False)
+    except FileNotFoundError as e:
+        return {"status": "error", "message": str(e)}
+
+    # Atom cap applies to the SUPERCELL (n_primitive × Nx×Ny×Nz), not the input.
+    try:
+        from pymatgen.core import Structure
+        n_prim = len(Structure.from_file(str(poscar_path)))
+        n_super = n_prim * sc[0] * sc[1] * sc[2]
+        if n_super > settings.max_atoms:
+            return {
+                "status": "error",
+                "message": (
+                    f"A {sc[0]}×{sc[1]}×{sc[2]} supercell of this {n_prim}-atom cell is "
+                    f"{n_super} atoms, above the {settings.max_atoms}-atom limit. "
+                    "Use a smaller supercell or a smaller unit cell."
+                ),
+            }
+    except Exception:  # noqa: BLE001 — let the worker surface a real parse error
+        pass
+
+    calc_cfg = _resolve_calculator(calculator_type, calculator_model)
+    if calc_cfg.get("status") == "error":
+        return calc_cfg
+
+    result = _enqueue_job(
+        JobType.PHONON,
+        poscar_path=poscar_path,
+        output_dir=session_path() / "phonon",
+        params={"supercell": list(sc), "disp_distance": disp_distance, "mesh": mesh},
+        calculator=calc_cfg,
+        emit_vasp_inputs=False,
+    )
+    if result.get("status") == "queued":
+        result["calculator"] = calc_cfg
+        result["message"] = f"{result['message']} Using {_calc_label(calc_cfg)}."
+    return result

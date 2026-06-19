@@ -139,6 +139,25 @@ class ComputeElasticInput(BaseModel):
         True, description="also write a VASP elastic INCAR + KPOINTS for DFT handoff")
 
 
+# ── 5.7 compute_phonons ───────────────────────────────────────────────────────
+
+class ComputePhononInput(BaseModel):
+    poscar_name: Optional[str] = Field(
+        None, description="session structure to use (auto-detects POSCAR if omitted)")
+    material_id: Optional[str] = Field(
+        None, description="optional: use a database structure instead of a session file")
+    source: Optional[str] = Field(
+        None, description='"mp" | "c2db" | "oqmd" (paired with material_id)')
+    supercell: str = Field(
+        "3 3 3", description='phonon supercell, e.g. "3 3 3" or "2 2 2" (bigger = more accurate, slower)')
+    disp_distance: float = Field(
+        0.01, description="finite-displacement distance in Å")
+    mesh: int = Field(
+        20, ge=5, le=60, description="q-point mesh density for the phonon DOS (N×N×N)")
+    calculator_type: str = Field("mace", description=_CALC_TYPE_DESC)
+    calculator_model: Optional[str] = Field(None, description=_CALC_MODEL_DESC)
+
+
 # ── 14.5 generate_poscar ──────────────────────────────────────────────────────
 
 class GeneratePoscarInput(BaseModel):

@@ -10,6 +10,7 @@ from app.tools.contracts import (
     AnalyzeSymmetryInput,
     BuildStructureInput,
     ComputeElasticInput,
+    ComputePhononInput,
     CreateInterstitialInput,
     CreateSubstitutionInput,
     CreateVacancyInput,
@@ -40,6 +41,7 @@ _TOOL_SPECS = [
     ("optimize_structure",   "Optimizing structure",         OptimizeStructureInput),
     ("run_md_simulation",    "Running MD simulation",         RunMdSimulationInput),
     ("compute_elastic_tensor", "Computing elastic properties", ComputeElasticInput),
+    ("compute_phonons",       "Computing phonons",            ComputePhononInput),
 ]
 
 
