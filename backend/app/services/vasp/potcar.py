@@ -182,15 +182,20 @@ def _format_spec(result: PotcarResult) -> str:
 
 
 def write_potcar_spec(structure, dest_dir: Path) -> PotcarResult:
-    """Write ``POTCAR.spec`` (and a real ``POTCAR`` if configured) into `dest_dir`.
+    """Write the POTCAR for `structure` into `dest_dir` and return its `PotcarResult`.
 
-    Returns the resolved `PotcarResult` (entries, recommended ENCUT, file paths,
-    warnings) so the VASP service can set ENCUT and report potentials.
+    When a licensed PAW library is configured a real ``POTCAR`` is assembled and
+    that is the only POTCAR file written (V2 — VASP needs just the 4 files
+    POSCAR/INCAR/KPOINTS/POTCAR). Only when no real POTCAR can be produced do we
+    fall back to the human-readable ``POTCAR.spec`` so the user still knows which
+    potentials and ENCUT to use. ENCUT/ZVAL are resolved either way.
     """
     result = build_potcar_spec(structure)
     _try_real_potcar(result, dest_dir)
 
-    spec_path = dest_dir / "POTCAR.spec"
-    spec_path.write_text(_format_spec(result))
-    result.spec_path = str(spec_path)
+    # Spec is a fallback only — never alongside a real POTCAR.
+    if not result.potcar_path:
+        spec_path = dest_dir / "POTCAR.spec"
+        spec_path.write_text(_format_spec(result))
+        result.spec_path = str(spec_path)
     return result

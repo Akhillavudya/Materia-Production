@@ -113,13 +113,21 @@ Sequenced so shared helpers land first and each phase is independently verifiabl
 - **N1 moved to Phase F** (it touches the optimize/MD workers, not structure
   writing).
 
-### Phase B — VASP correctness (V2, V4)
-- POTCAR: when a real POTCAR is assembled, **skip POTCAR.spec**; spec only when
-  no licensed library. Confirm final set = `POSCAR, INCAR, KPOINTS, POTCAR`.
-- V4 QA pass: spot-check INCAR tags per task, KPOINTS density per task, and
-  POTCAR labels (`Na_pv`, `K_sv`, `Ti_sv`, …) against the curated table.
-- **Verify:** generate inputs for a multi-element material with the PAW lib
-  mounted → exactly 4 files, correct labels, sane ENCUT/mesh.
+### Phase B — VASP correctness (V2, V4) — ✅ DONE 2026-06-19
+- V2: `potcar.write_potcar_spec` now writes `POTCAR.spec` **only as a fallback**
+  when no real POTCAR can be assembled; with the licensed PAW lib it writes
+  `POTCAR` alone. `service.py` already added spec/potcar conditionally, so the
+  set is now exactly `POSCAR, INCAR, KPOINTS, POTCAR` (or `…/POTCAR.spec` w/o a
+  license).
+- V4 review: INCAR tasks correct (opt IBRION=2; static/band IBRION=-1 NSW=0; DOS
+  ISMEAR=-5 tetrahedron; elastic IBRION=6 ISIF=3; phonon_dfpt IBRION=8; MD
+  IBRION=0); ISIF map none=2/shape=5/full=3; KPOINTS density 40 default / 60
+  DOS+dense; POTCAR variants from curated table (Na_pv, Ti_sv, …).
+- **Verified in the api container (real app modules + mounted PAW lib):**
+  - real-POTCAR path → `[INCAR, KPOINTS, POSCAR, POTCAR]`, no spec, header
+    `PAW_PBE Na_pv`, ENCUT 520 from real ENMAX.
+  - no-license path → spec fallback, still 4 files, no labeled POSCAR copy.
+  - labels Na_pv / Ti_sv / O correct; `py_compile` clean.
 
 ### Phase C — Optimize = only optimize (V3) + agent guard (BS2)
 - `optimize_structure` default `emit_vasp_inputs=False`; remove bundled VASP gen
