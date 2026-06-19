@@ -15,6 +15,7 @@ from app.tools.contracts import (
     CreateSubstitutionInput,
     CreateVacancyInput,
     GeneratePoscarInput,
+    GenerateSqsInput,
     GenerateVaspInputsInput,
     ListFilesInput,
     ListModelsInput,
@@ -42,6 +43,7 @@ _TOOL_SPECS = [
     ("run_md_simulation",    "Running MD simulation",         RunMdSimulationInput),
     ("compute_elastic_tensor", "Computing elastic properties", ComputeElasticInput),
     ("compute_phonons",       "Computing phonons",            ComputePhononInput),
+    ("generate_sqs",          "Generating SQS (ATAT mcsqs)",  GenerateSqsInput),
 ]
 
 

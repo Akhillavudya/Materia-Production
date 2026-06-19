@@ -26,6 +26,9 @@ _ARTIFACT_KIND = {
     "plot_energy": "plot", "plot_temp": "plot",
     "elastic_tensor_csv": "data", "stress_csv": "data", "mechanical_json": "data",
     "phonon_plot": "plot", "phonopy_yaml": "data", "band_csv": "data", "dos_csv": "data",
+    "bestsqs_out": "data", "rndstr_in": "data", "sqscell_out": "data",
+    "parent_cif": "structure", "sublattices_json": "data",
+    "bestcorr_out": "data", "mcsqs_progress_csv": "data",
 }
 
 
@@ -129,6 +132,20 @@ def _run(job_id: str, job_type: JobType) -> None:
                 calculator=calc,
                 progress_callback=reporter,
             )
+        elif job_type is JobType.SQS:
+            from app.services.simulation.sqs import run_sqs
+            result = run_sqs(
+                cif_path=spec["poscar_path"],   # resolved disordered structure file
+                output_dir=spec["output_dir"],
+                target_comp=params.get("target_comp"),
+                supercell=tuple(params.get("supercell", (2, 2, 2))),
+                cutoff=params.get("cutoff"),
+                n_parallel=params.get("n_parallel", 4),
+                target_objective=params.get("target_objective", -0.99),
+                occ_threshold=params.get("occ_threshold", 0.05),
+                time_budget_s=params.get("time_budget_s", 600),
+                progress_callback=reporter,
+            )
         else:
             raise ValueError(f"Unknown job type: {job_type}")
     except Exception as exc:  # noqa: BLE001 — any failure → job failed, not a crash
@@ -179,3 +196,8 @@ def run_elastic_job(self, job_id: str) -> None:     # noqa: ARG001
 @celery_app.task(name="jobs.phonon", bind=True)
 def run_phonon_job(self, job_id: str) -> None:      # noqa: ARG001
     _run(job_id, JobType.PHONON)
+
+
+@celery_app.task(name="jobs.sqs", bind=True)
+def run_sqs_job(self, job_id: str) -> None:         # noqa: ARG001
+    _run(job_id, JobType.SQS)

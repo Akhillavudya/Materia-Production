@@ -1241,3 +1241,78 @@ def compute_phonons(
         result["calculator"] = calc_cfg
         result["message"] = f"{result['message']} Using {_calc_label(calc_cfg)}."
     return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TOOL — generate_sqs  (Step 5.7; ATAT mcsqs)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _parse_target_comp(text: Optional[str]) -> Optional[dict]:
+    """Parse "Li:1,Ni:0.8,Mn:0.1" → {"Li":1.0,...}; None/blank → None."""
+    if not text:
+        return None
+    out: dict = {}
+    for part in str(text).replace(";", ",").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if ":" in part:
+            el, val = part.split(":", 1)
+        elif "=" in part:
+            el, val = part.split("=", 1)
+        else:
+            raise ValueError(
+                f"Invalid target_comp entry '{part}'. Use 'El:value' pairs.")
+        out[el.strip()] = float(val)
+    return out or None
+
+
+def generate_sqs(
+    cif_name:         Optional[str] = None,
+    target_comp:      Optional[str] = None,
+    supercell:        str           = "2 2 2",
+    cutoff:           Optional[float] = None,
+    n_parallel:       int           = 4,
+    target_objective: float         = -0.99,
+    time_budget_s:    int           = 600,
+) -> dict:
+    """Queue a Special Quasi-random Structure (SQS) job via ATAT mcsqs.
+
+    Takes a disordered structure (partial site occupancies), finds the best
+    quasi-random ordering in a supercell, and writes it as a POSCAR. Long-running,
+    so this enqueues a job and returns a ``job_id`` immediately.
+    """
+    try:
+        sc = _parse_supercell(supercell)
+    except ValueError as e:
+        return {"status": "error", "message": str(e)}
+
+    try:
+        comp = _parse_target_comp(target_comp)
+    except ValueError as e:
+        return {"status": "error", "message": str(e)}
+
+    n_parallel = min(max(int(n_parallel), 1), 16)
+    time_budget_s = max(int(time_budget_s), 30)
+
+    try:
+        cif_path = find_structure_in_session(cif_name, prefer_contcar=False)
+    except FileNotFoundError as e:
+        return {"status": "error", "message": str(e)}
+
+    result = _enqueue_job(
+        JobType.SQS,
+        poscar_path=cif_path,
+        output_dir=session_path() / "sqs",
+        params={
+            "target_comp": comp,
+            "supercell": list(sc),
+            "cutoff": cutoff,
+            "n_parallel": n_parallel,
+            "target_objective": float(target_objective),
+            "time_budget_s": time_budget_s,
+        },
+        calculator={},
+        emit_vasp_inputs=False,
+    )
+    return result

@@ -158,6 +158,27 @@ class ComputePhononInput(BaseModel):
     calculator_model: Optional[str] = Field(None, description=_CALC_MODEL_DESC)
 
 
+# ── 5.7 generate_sqs ──────────────────────────────────────────────────────────
+
+class GenerateSqsInput(BaseModel):
+    cif_name: Optional[str] = Field(
+        None, description="disordered CIF in the session (partial site occupancies); "
+                          "auto-detects the most recent structure file if omitted")
+    target_comp: Optional[str] = Field(
+        None, description='optional target composition override, e.g. '
+                          '"Li:1,Ni:0.8,Mn:0.1,Co:0.1,O:2"')
+    supercell: str = Field(
+        "2 2 2", description='SQS supercell size, e.g. "5 2 1" or "2 2 2"')
+    cutoff: Optional[float] = Field(
+        None, description="pair-correlation cutoff in Å (auto-recommended if omitted)")
+    n_parallel: int = Field(
+        4, ge=1, le=16, description="number of parallel mcsqs searches")
+    target_objective: float = Field(
+        -0.99, description="stop when the best mcsqs objective drops below this")
+    time_budget_s: int = Field(
+        600, ge=30, description="max seconds to spend searching before taking the best so far")
+
+
 # ── 14.5 generate_poscar ──────────────────────────────────────────────────────
 
 class GeneratePoscarInput(BaseModel):

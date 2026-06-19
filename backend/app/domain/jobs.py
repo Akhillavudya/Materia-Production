@@ -20,6 +20,7 @@ class JobType(str, Enum):
     MD = "md"
     ELASTIC = "elastic"
     PHONON = "phonon"
+    SQS = "sqs"
 
 
 class JobStatus(str, Enum):

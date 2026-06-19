@@ -14,9 +14,26 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         gcc g++ \
+        make \
         curl \
         libgomp1 \
     && rm -rf /var/lib/apt/lists/*
+
+# ── ATAT (corrdump / getclus / mcsqs) for the SQS tool (Step 5.7) ────────────
+# ATAT is compiled C++ from source (no apt/pip package). We pin a version and
+# install the binaries to /usr/local/bin so the worker finds them on PATH.
+# NOTE: if the upstream URL/version changes, update ATAT_URL/ATAT_VERSION below.
+# This is its own layer so it caches independently of the Python deps.
+ARG ATAT_VERSION=3.50
+ARG ATAT_URL=https://axelvandewalle.github.io/www-avdw/atat/atat3_50.tar.gz
+RUN curl -fsSL "$ATAT_URL" -o /tmp/atat.tar.gz \
+    && mkdir -p /opt/atat \
+    && tar -xzf /tmp/atat.tar.gz -C /opt/atat --strip-components=1 \
+    && sed -i 's|^BINDIR=.*|BINDIR=/usr/local/bin|; s|^PREFIX=.*|PREFIX=/usr/local|' /opt/atat/makefile \
+    && make -C /opt/atat \
+    && make -C /opt/atat install \
+    && rm -f /tmp/atat.tar.gz \
+    && corrdump --help >/dev/null 2>&1 || true
 
 # Install Python deps FIRST (own layer) so code edits don't re-download everything.
 COPY requirements.txt .
