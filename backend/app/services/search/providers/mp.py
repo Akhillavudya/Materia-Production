@@ -15,6 +15,10 @@ from app.services.search.mappers import mp_doc_to_card
 
 logger = get_logger(__name__)
 
+# Hard cap on results pulled back per query — bounds the response/CSV size for
+# formulas with hundreds of polymorphs while still covering the common cases.
+MAX_RESULTS = 200
+
 
 class MPProvider:
     source = Source.MP
@@ -45,7 +49,7 @@ class MPProvider:
         fields = [
             "material_id", "formula_pretty", "band_gap",
             "formation_energy_per_atom", "energy_per_atom",
-            "symmetry", "energy_above_hull", "elements",
+            "symmetry", "energy_above_hull", "elements", "nsites",
         ]
 
         with MPRester(api_key=api_key, mute_progress_bars=True) as mpr:
@@ -54,8 +58,10 @@ class MPProvider:
         if not docs:
             return []
 
+        # Return the FULL stability-sorted set (capped) — the tool slices the
+        # top-N for display and writes the rest to a polymorphs CSV (S1).
         docs_sorted = sorted(docs, key=lambda d: d.energy_above_hull or 999)
-        return [mp_doc_to_card(d) for d in docs_sorted[: query.limit]]
+        return [mp_doc_to_card(d) for d in docs_sorted[:MAX_RESULTS]]
 
     def get_structure(self, source_id: str):
         key = os.environ.get("MP_API_KEY", "")

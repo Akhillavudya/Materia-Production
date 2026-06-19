@@ -11,8 +11,10 @@ HTTP, no SQL here.
   run_md_simulation     — ASE NVT / NPT molecular dynamics
 """
 
+import csv
 import hashlib
 import json
+import re
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -153,6 +155,44 @@ _SOURCE_LABELS = {
     "oqmd": "OQMD (Open Quantum Materials Database)",
 }
 
+# Columns for the S1 "all polymorphs" CSV (card attr → header).
+_POLYMORPH_CSV_COLUMNS = [
+    ("id",                            "material_id"),
+    ("formula",                       "formula"),
+    ("crystal_system",               "crystal_system"),
+    ("spacegroup_symbol",            "spacegroup"),
+    ("band_gap_eV",                  "band_gap_eV"),
+    ("energy_above_hull_eV_per_atom", "e_above_hull_eV"),
+    ("formation_energy_eV_per_atom", "formation_e_eV_atom"),
+    ("n_atoms",                       "n_atoms"),
+    ("source",                        "source"),
+]
+
+
+def _write_polymorphs_csv(cards, query_str: str) -> Optional[str]:
+    """Write every matching card's metadata to ``<formula>_polymorphs.csv`` (S1).
+
+    Returns the filename on success, or None if it could not be written (e.g. no
+    active session). Structures are NOT fetched — this is metadata only.
+    """
+    safe = re.sub(r"[^\w.-]", "_", query_str) or "search"
+    fname = f"{safe}_polymorphs.csv"
+    try:
+        path = session_dir() / fname
+        with path.open("w", newline="") as fh:
+            writer = csv.writer(fh)
+            writer.writerow([h for _, h in _POLYMORPH_CSV_COLUMNS])
+            for c in cards:
+                row = []
+                for attr, _ in _POLYMORPH_CSV_COLUMNS:
+                    val = getattr(c, attr, None)
+                    row.append(getattr(val, "value", val))   # enum → its value
+                writer.writerow(row)
+    except Exception as e:  # noqa: BLE001 — CSV is a bonus, never fail the search
+        logger.warning("Could not write polymorphs CSV: %s", e)
+        return None
+    return fname
+
 
 def search_materials(
     formula:         Optional[str]   = None,
@@ -178,19 +218,20 @@ def search_materials(
     elem_list = (
         [e.strip() for e in elements.split(",") if e.strip()] if elements else []
     )
+    display_limit = min(max(int(limit), 1), 20)
     query = MaterialQuery(
         formula=formula, element=element, elements=elem_list,
         min_gap=min_gap, max_gap=max_gap, max_formation_e=max_formation_e,
-        dimensionality=dimensionality, limit=min(int(limit), 20),
+        dimensionality=dimensionality, limit=display_limit,
     )
 
     result    = search_service.search(query)
-    cards     = [c.model_dump(mode="json") for c in result.cards]
+    all_cards = result.cards                       # full stability-sorted set (capped)
     tried     = [s.value for s in result.sources_tried]
     source    = result.source_used.value if result.source_used else None
     query_str = formula or element or elements or ""
 
-    if not cards:
+    if not all_cards:
         return {
             "status":         "not_found",
             "source_used":    None,
@@ -205,20 +246,33 @@ def search_materials(
             ),
         }
 
+    display_cards = all_cards[:display_limit]
+    materials = [c.model_dump(mode="json") for c in display_cards]
+    total, returned = len(all_cards), len(display_cards)
+
+    # S1: when there are more matches than we display, dump the full metadata set
+    # to a CSV so the user can browse every polymorph and pick one to fetch.
+    polymorphs_csv = _write_polymorphs_csv(all_cards, query_str) if total > returned else None
+
     tried_other = [s for s in tried if s != source]
     note = f" (not found in {', '.join(tried_other)})" if tried_other else ""
+    if polymorphs_csv:
+        msg = (f"Found {total} matches for '{query_str}' in "
+               f"{_SOURCE_LABELS.get(source, source)}{note} — showing the {returned} "
+               f"most stable. Full list saved to {polymorphs_csv} ({total} rows).")
+    else:
+        msg = (f"Found {total} result{'s' if total != 1 else ''} for '{query_str}' "
+               f"in {_SOURCE_LABELS.get(source, source)}{note}.")
 
     return {
         "status":         "ok",
         "source_used":    source,
         "sources_tried":  tried,
-        "materials":      cards,
-        "total_matching": len(cards),
-        "returned":       len(cards),
-        "message": (
-            f"Found {len(cards)} result{'s' if len(cards) != 1 else ''} "
-            f"for '{query_str}' in {_SOURCE_LABELS.get(source, source)}{note}."
-        ),
+        "materials":      materials,
+        "total_matching": total,
+        "returned":       returned,
+        "polymorphs_csv": polymorphs_csv,
+        "message":        msg,
     }
 
 

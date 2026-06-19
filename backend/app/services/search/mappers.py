@@ -21,6 +21,36 @@ def _to_float(value) -> float | None:
         return None
 
 
+# Space-group number → crystal system (IUCr ranges). Used to fill the
+# "geometry" column when a source doesn't hand us the crystal system directly.
+_CRYSTAL_SYSTEM_RANGES = [
+    (2, "triclinic"), (15, "monoclinic"), (74, "orthorhombic"),
+    (142, "tetragonal"), (167, "trigonal"), (194, "hexagonal"), (230, "cubic"),
+]
+
+
+def _crystal_system_from_number(n) -> str | None:
+    try:
+        n = int(n)
+    except (TypeError, ValueError):
+        return None
+    if not 1 <= n <= 230:
+        return None
+    for hi, name in _CRYSTAL_SYSTEM_RANGES:
+        if n <= hi:
+            return name
+    return None
+
+
+def _coerce_crystal_system(value, spg_number=None) -> str | None:
+    """Normalise a provider's crystal-system value, or derive it from a space group."""
+    if value is not None:
+        s = str(getattr(value, "value", value)).strip().lower()
+        if s and s not in ("none", "unknown"):
+            return s
+    return _crystal_system_from_number(spg_number)
+
+
 def _to_bool(value) -> bool | None:
     """Coerce assorted truthy/falsey representations to a real bool or None.
 
@@ -45,18 +75,24 @@ def _to_bool(value) -> bool | None:
 def mp_doc_to_card(doc) -> MaterialCard:
     mid = str(doc.material_id)
     elements = [str(e) for e in (doc.elements or [])]
+    sym = doc.symmetry
+    spg_number = getattr(sym, "number", None) if sym else None
     return MaterialCard(
         id=mid,                                   # already "mp-19306"
         source=Source.MP,
         source_id=mid,
         formula=doc.formula_pretty or "",
         elements=elements,
+        n_atoms=getattr(doc, "nsites", None),
         dimensionality=Dimensionality.BULK,
         band_gap_eV=_to_float(doc.band_gap),
         formation_energy_eV_per_atom=_to_float(doc.formation_energy_per_atom),
         energy_above_hull_eV_per_atom=_to_float(doc.energy_above_hull),
         energy_per_atom_eV=_to_float(doc.energy_per_atom),
-        spacegroup_symbol=(doc.symmetry.symbol if doc.symmetry else None),
+        spacegroup_symbol=(sym.symbol if sym else None),
+        spacegroup_number=spg_number,
+        crystal_system=_coerce_crystal_system(
+            getattr(sym, "crystal_system", None) if sym else None, spg_number),
         source_url=f"https://materialsproject.org/materials/{mid}",
     )
 
@@ -80,6 +116,9 @@ def c2db_row_to_card(row) -> MaterialCard:
         formation_energy_eV_per_atom=_to_float(kv.get("hform")),
         energy_above_hull_eV_per_atom=_to_float(kv.get("ehull")),
         spacegroup_symbol=kv.get("international"),
+        crystal_system=_coerce_crystal_system(
+            kv.get("crystal_system"),
+            kv.get("spgnum") or kv.get("space_group_number")),
         magnetic=_to_bool(kv.get("is_magnetic")),
         source_url=(f"https://cmrdb.fysik.dtu.dk/c2db/row/{uid}" if uid else None),
     )
@@ -102,5 +141,8 @@ def oqmd_item_to_card(item, fallback_formula: str | None = None) -> MaterialCard
         formation_energy_eV_per_atom=_to_float(item.get("delta_e")),
         energy_above_hull_eV_per_atom=_to_float(item.get("stability")),
         spacegroup_symbol=item.get("spacegroup") or item.get("space_group"),
+        crystal_system=_coerce_crystal_system(
+            item.get("crystal_system"),
+            item.get("spacegroup_number") or item.get("spg_number")),
         source_url=f"https://oqmd.org/materials/entry/{entry_id}",
     )

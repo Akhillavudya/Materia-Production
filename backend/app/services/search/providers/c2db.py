@@ -43,7 +43,7 @@ class C2DBProvider:
                 continue
 
             cards.append(c2db_row_to_card(row))
-            if len(cards) >= query.limit:
+            if len(cards) >= 200:   # full set (capped); tool slices for display (S1)
                 break
 
         return cards

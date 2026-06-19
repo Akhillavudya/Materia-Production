@@ -154,6 +154,18 @@ const s = {
     flexShrink: 0,
     transition: 'all 0.1s',
   },
+
+  activeBadge: {
+    fontSize: '9px',
+    fontWeight: '700',
+    letterSpacing: '0.05em',
+    color: '#166534',
+    background: '#ecfdf3',
+    border: '1px solid #bbf7d0',
+    borderRadius: '4px',
+    padding: '1px 4px',
+    flexShrink: 0,
+  },
 }
 
 function fileIcon(name) {
@@ -273,6 +285,11 @@ export default function FilePanel({ sessionId, refreshTrigger }) {
                     file.name.toLowerCase().endsWith('.cif') ||
                     file.name.toLowerCase().endsWith('.xyz')
 
+              // The plain "POSCAR" is the session's active structure — the one
+              // optimize / MD / VASP pick up by default (S2). Tagged copies
+              // (POSCAR_Si_slab111, …) say what each artifact is.
+              const isActive = upperName === 'POSCAR'
+
               return (
                 <div
                   key={fi}
@@ -294,6 +311,15 @@ export default function FilePanel({ sessionId, refreshTrigger }) {
                   >
                     {file.name}
                   </span>
+
+                  {isActive && (
+                    <span
+                      style={s.activeBadge}
+                      title="Active structure — used by optimize / MD / VASP"
+                    >
+                      ACTIVE
+                    </span>
+                  )}
 
                   <span style={s.fileSize}>
                     {file.size_kb < 1

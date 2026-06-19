@@ -144,15 +144,35 @@ Sequenced so shared helpers land first and each phase is independently verifiabl
   generate_vasp_inputs during an optimize is separately reduced by V3 (no bundled
   gen) and would need a SYSTEM_PROMPT nudge if it recurs.
 
-### Phase D — Search browse + columns (S1, S2, S3)
-- S3: map `symmetry.crystal_system` in `mappers.py` (MP); derive crystal system
-  from space group for C2DB/OQMD so the column isn't blank.
-- S1: when `total_matching > 10`, write `<formula>_polymorphs.csv` with
-  `id, formula, crystal_system, spacegroup, band_gap, e_above_hull,
-  formation_e, n_atoms, source`. Keep top-10 in the UI/result.
-- S2: surface an "Active structure: X" indicator (backend returns active formula;
-  frontend shows it). Covers generate_poscar visibility too.
-- **Verify:** search Al2O3 → top-10 in UI + CSV with all rows + crystal-system col.
+### Phase D — Search browse + columns (S1 + S3 backend) — ✅ DONE 2026-06-19
+- S3 (data): `MaterialCard` gained `crystal_system`; `mappers.py` maps it from
+  MP's `symmetry.crystal_system`/`number` and derives it from the space-group
+  number for C2DB/OQMD (IUCr ranges helper). MP mapper also fills `n_atoms`
+  (nsites) and `spacegroup_number`.
+- S1: providers now return the **full** stability-sorted set (capped at 200; MP
+  added `nsites`). `search_materials` displays the top-N (≤20), reports the
+  **true** `total_matching`, and when `total > shown` writes
+  `<formula>_polymorphs.csv` (cols: material_id, formula, crystal_system,
+  spacegroup, band_gap_eV, e_above_hull_eV, formation_e_eV_atom, n_atoms,
+  source) — metadata only, no structures fetched. Envelope gains `polymorphs_csv`.
+- Agent/UI plumbing: `crystal_system` added to `_MATERIAL_LLM_FIELDS`;
+  `polymorphs_csv` added to the `[FILES:]` payload passthrough.
+- **Verified (real app modules in container, then restored):** crystal-system
+  range boundaries, coerce precedence, `crystal_system` in `model_dump`, and CSV
+  header/row shape; `py_compile` on all 7 files.
+
+### Phase D-frontend — S2 + S3 UI column — ✅ DONE 2026-06-19
+- S2: `FilePanel.jsx` now badges the plain `POSCAR` row with a green **ACTIVE**
+  pill (tooltip: "used by optimize / MD / VASP"). The tagged copies from Phase A
+  (`POSCAR_Si_slab111`, …) already say *what* each artifact is, so "which is
+  active" is now obvious at a glance.
+- S3 (display): there is no dedicated materials-table component — search results
+  are rendered as the agent's Markdown. Delivered the geometry column by (a)
+  adding `crystal_system` to `_MATERIAL_LLM_FIELDS` (Phase D backend) and (b)
+  updating the SYSTEM_PROMPT table spec to `(id, formula, crystal system, source,
+  band gap, formation energy)` + a nudge to point users at `polymorphs_csv`.
+- **Verified:** `vite build` succeeds (exit 0); badge logic keys off exact name
+  `POSCAR`.
 
 ### Phase E — Upload front door (U1, U2, U3)
 - U3: add `.vasp` to `ALLOWED_UPLOAD_EXTENSIONS`.

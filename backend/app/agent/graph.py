@@ -87,7 +87,9 @@ succeeded.
 - If you intend to start a job, you MUST emit the tool call. Describing the action \
 in prose is not the same as doing it; only a real tool call runs anything.
 - After a search, present the results as a compact Markdown table (id, formula, \
-source, band gap, formation energy).
+crystal system, source, band gap, formation energy). If the result includes a \
+`polymorphs_csv`, tell the user that the full list of all matches (metadata only) \
+was saved to that CSV so they can browse every polymorph and pick one.
 - For conceptual questions, greetings, or anything answerable from the \
 conversation, just reply directly — do not call a tool.
 - Be concise, accurate, and scientific. Use Markdown.
@@ -156,8 +158,8 @@ def normalize_tool_status(status: str) -> str:
 
 _MATERIAL_LLM_FIELDS = (
     "id", "formula", "source", "band_gap_eV", "formation_energy_eV_per_atom",
-    "energy_above_hull_eV_per_atom", "spacegroup_symbol", "dimensionality",
-    "has_structure",
+    "energy_above_hull_eV_per_atom", "spacegroup_symbol", "crystal_system",
+    "dimensionality", "has_structure",
 )
 
 
@@ -242,7 +244,7 @@ async def _execute_tool(
         if isinstance(result, dict):
             for key in (
                 "materials", "source_used", "sources_tried", "total_matching",
-                "returned", "formula", "n_sites", "task", "encut", "kmesh",
+                "returned", "polymorphs_csv", "formula", "n_sites", "task", "encut", "kmesh",
                 "elements", "files_written", "source", "material_id",
                 "job_id", "type", "track", "calculator", "models",
                 "file_type", "source_file", "content_preview",

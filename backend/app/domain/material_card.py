@@ -56,6 +56,7 @@ class MaterialCard(BaseModel):
     # ── Structure / symmetry ──────────────────────────────────────────────────
     spacegroup_symbol: str | None = None
     spacegroup_number: int | None = None
+    crystal_system: str | None = None     # cubic | tetragonal | … (the "geometry")
     magnetic: bool | None = None
     density_g_cm3: float | None = None
     has_structure: bool = True

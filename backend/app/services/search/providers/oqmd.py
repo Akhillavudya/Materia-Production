@@ -43,7 +43,7 @@ class OQMDProvider:
         return True
 
     def search(self, query: MaterialQuery) -> list[MaterialCard]:
-        limit = min(int(query.limit), 50)
+        limit = 200   # full set (capped); tool slices for display (S1)
         params: dict[str, str] = {
             "limit": str(limit),
             "offset": "0",
