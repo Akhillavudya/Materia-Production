@@ -442,6 +442,22 @@ def generate_poscar(
 _BUILD_OPERATIONS = {"make_supercell", "add_vacuum", "make_slab", "convert"}
 
 
+def _build_tag(operation: str, *, scaling=None, axis=None, miller=None):
+    """Operation tag for the labeled POSCAR copy (BS1), e.g. 'slab111', '2x2x1'."""
+    if operation == "make_supercell":
+        vals = str(scaling or "").replace(",", " ").split()
+        if len(vals) == 1 and vals[0]:
+            return f"{vals[0]}x{vals[0]}x{vals[0]}"
+        if len(vals) == 3:
+            return "x".join(vals)
+        return "supercell"
+    if operation == "add_vacuum":
+        return f"vacuum-{str(axis).lower().strip()}"
+    if operation == "make_slab":
+        return "slab" + "".join(str(miller or "").replace(",", " ").split())
+    return None
+
+
 def _resolve_build_input(material_id, source, poscar_path):
     """Resolve the structure to transform: a database id, or the active session POSCAR."""
     if material_id:
@@ -554,8 +570,9 @@ def build_structure(
                             "Use a smaller scaling factor.")}
 
     formula = result.composition.reduced_formula
+    tag = _build_tag(op, scaling=scaling, axis=axis, miller=miller)
     try:
-        write_poscar(result, session_dir(), name=formula)
+        wp = write_poscar(result, session_dir(), name=formula, tag=tag)
     except Exception as e:  # noqa: BLE001
         return {"status": "error", "message": f"Could not write the structure: {e}"}
 
@@ -576,10 +593,10 @@ def build_structure(
         "n_sites_before": n_before,
         "n_sites":        len(result),
         "lattice_abc":    abc,
-        "files_written":  ["POSCAR", f"POSCAR_{formula}"],
+        "files_written":  wp["files_written"],
         "message": (
             f"{op}: {formula} {detail}. "
-            "Wrote POSCAR — this structure is now active for the next step."
+            f"Wrote {wp['files_written'][-1]} (active as POSCAR) for the next step."
         ),
     }
 
@@ -623,11 +640,12 @@ def analyze_symmetry(
                     "message": (f"The {write_kind} cell has {len(std)} atoms, above the "
                                 f"{settings.max_atoms}-atom limit.")}
         formula = std.composition.reduced_formula
+        tag = {"primitive": "prim", "conventional": "conv"}.get(write_kind)
         try:
-            write_poscar(std, session_dir(), name=formula)
+            wp = write_poscar(std, session_dir(), name=formula, tag=tag)
         except Exception as e:  # noqa: BLE001
             return {"status": "error", "message": f"Could not write the structure: {e}"}
-        files_written = ["POSCAR", f"POSCAR_{formula}"]
+        files_written = wp["files_written"]
     elif write_kind:
         return {"status": "error",
                 "message": f"Invalid write '{write}'. Use: primitive | conventional (or omit)."}
@@ -645,7 +663,8 @@ def analyze_symmetry(
 # TOOLS — create_vacancy / create_substitution / create_interstitial (Step 5.5)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _finish_defect(sc, defect_name: str, kind: str, n_bulk: int) -> dict:
+def _finish_defect(sc, defect_name: str, kind: str, n_bulk: int,
+                   tag: Optional[str] = None) -> dict:
     """Atom-cap, write the defective supercell as the active POSCAR, return the envelope."""
     if len(sc) > settings.max_atoms:
         return {"status": "error",
@@ -653,7 +672,7 @@ def _finish_defect(sc, defect_name: str, kind: str, n_bulk: int) -> dict:
                             f"{settings.max_atoms}-atom limit. Use a smaller supercell.")}
     formula = sc.composition.reduced_formula
     try:
-        write_poscar(sc, session_dir(), name=formula)
+        wp = write_poscar(sc, session_dir(), name=formula, tag=tag)
     except Exception as e:  # noqa: BLE001
         return {"status": "error", "message": f"Could not write the structure: {e}"}
     return {
@@ -662,11 +681,12 @@ def _finish_defect(sc, defect_name: str, kind: str, n_bulk: int) -> dict:
         "defect_name":   defect_name,
         "formula":       formula,
         "n_sites":       len(sc),
-        "files_written": ["POSCAR", f"POSCAR_{formula}"],
+        "files_written": wp["files_written"],
         "message": (
             f"Created {kind} ({defect_name}); supercell now has {len(sc)} atoms. "
-            "Wrote POSCAR — active for the next step. To make it a CHARGED defect, run "
-            "generate_vasp_inputs with a `charge` value (it sets NELECT)."
+            f"Wrote {wp['files_written'][-1]} (active as POSCAR) for the next step. "
+            "To make it a CHARGED defect, run generate_vasp_inputs with a `charge` "
+            "value (it sets NELECT)."
         ),
     }
 
@@ -691,7 +711,8 @@ def create_vacancy(
         sc, name = builder.create_vacancy(structure, element=element, supercell=supercell)
     except Exception as e:  # noqa: BLE001
         return {"status": "error", "message": f"Vacancy creation failed: {e}"}
-    return _finish_defect(sc, name, "vacancy", len(structure))
+    tag = f"vac-{element}" if element else "vac"
+    return _finish_defect(sc, name, "vacancy", len(structure), tag=tag)
 
 
 def create_substitution(
@@ -712,7 +733,8 @@ def create_substitution(
             structure, from_element=from_element, to_element=to_element, supercell=supercell)
     except Exception as e:  # noqa: BLE001
         return {"status": "error", "message": f"Substitution failed: {e}"}
-    return _finish_defect(sc, name, "substitution", len(structure))
+    return _finish_defect(sc, name, "substitution", len(structure),
+                          tag=f"sub-{from_element}-{to_element}")
 
 
 def create_interstitial(
@@ -732,7 +754,8 @@ def create_interstitial(
             structure, insert_element=insert_element, supercell=supercell)
     except Exception as e:  # noqa: BLE001
         return {"status": "error", "message": f"Interstitial creation failed: {e}"}
-    return _finish_defect(sc, name, "interstitial", len(structure))
+    return _finish_defect(sc, name, "interstitial", len(structure),
+                          tag=f"int-{insert_element}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -860,7 +883,7 @@ def _read_structure_file(path: Path) -> dict:
 
     formula = structure.composition.reduced_formula
     try:
-        write_poscar(structure, session_dir(), name=formula)
+        wp = write_poscar(structure, session_dir(), name=formula)
     except Exception as e:  # noqa: BLE001
         return {"status": "error", "message": f"Could not activate structure: {e}"}
 
@@ -874,7 +897,7 @@ def _read_structure_file(path: Path) -> dict:
         "lattice_b":     round(structure.lattice.b, 4),
         "lattice_c":     round(structure.lattice.c, 4),
         "elements":      [str(e) for e in structure.composition.elements],
-        "files_written": ["POSCAR", f"POSCAR_{formula}"],
+        "files_written": wp["files_written"],
         "message": (
             f"Read {path.name}: {formula} ({len(structure)} atoms). Wrote POSCAR — "
             "this structure is now active for optimization, MD, or VASP inputs."

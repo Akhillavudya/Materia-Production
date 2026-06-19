@@ -71,9 +71,10 @@ class VaspService:
         overrides = dict(overrides or {})
         modifiers = dict(modifiers or {})
 
-        # POSCAR
+        # POSCAR — canonical only; VASP reads plain POSCAR, so no labeled copy
+        # is written into the input folder (V1).
         formula = structure.composition.reduced_formula
-        write_poscar(structure, out_dir, name=formula)
+        write_poscar(structure, out_dir, named_copy=False)
 
         # POTCAR.spec (+ real POTCAR if a licensed PAW dir is configured) → ENCUT
         potcar = write_potcar_spec(structure, out_dir)
