@@ -17,6 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         make \
         curl \
         libgomp1 \
+        tcsh \
     && rm -rf /var/lib/apt/lists/*
 
 # ── ATAT (corrdump / getclus / mcsqs) for the SQS tool (Step 5.7) ────────────
@@ -33,7 +34,15 @@ RUN curl -fsSL "$ATAT_URL" -o /tmp/atat.tar.gz \
     && make -C /opt/atat \
     && make -C /opt/atat install \
     && rm -f /tmp/atat.tar.gz \
-    && corrdump --help >/dev/null 2>&1 || true
+    # ATAT installs some scripts (e.g. getclus) as 0750 root-owned; the image runs
+    # as non-root appuser, so make every ATAT binary world-readable/executable —
+    # otherwise shutil.which() returns None for appuser and SQS silently degrades.
+    && chmod -R a+rX /usr/local/bin \
+    # Fail the build if any required ATAT binary is missing, rather than silently
+    # shipping an image where generate_sqs can never run. (foolproof.sh needs tcsh.)
+    && test -x /usr/local/bin/mcsqs \
+    && test -x /usr/local/bin/corrdump \
+    && test -x /usr/local/bin/getclus
 
 # Install Python deps FIRST (own layer) so code edits don't re-download everything.
 COPY requirements.txt .
