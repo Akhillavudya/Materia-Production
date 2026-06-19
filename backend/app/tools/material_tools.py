@@ -1010,10 +1010,12 @@ def optimize_structure(
     max_steps:        int           = 1000,
     calculator_type:  str           = "mace",
     calculator_model: Optional[str] = None,
-    emit_vasp_inputs: bool          = True,
+    emit_vasp_inputs: bool          = False,
 ) -> dict:
     """Queue an ASE geometry optimization job for a structure in the session.
 
+    Optimization does ONLY the relaxation of the active structure (V3): it does
+    not generate VASP inputs unless `emit_vasp_inputs=True` is explicitly passed.
     Long-running, so this enqueues a job and returns immediately with a
     ``job_id``; progress and results are tracked via ``/api/jobs`` (redesign §11).
     """

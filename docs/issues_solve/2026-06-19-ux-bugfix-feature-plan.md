@@ -129,11 +129,20 @@ Sequenced so shared helpers land first and each phase is independently verifiabl
   - no-license path → spec fallback, still 4 files, no labeled POSCAR copy.
   - labels Na_pv / Ti_sv / O correct; `py_compile` clean.
 
-### Phase C — Optimize = only optimize (V3) + agent guard (BS2)
-- `optimize_structure` default `emit_vasp_inputs=False`; remove bundled VASP gen
-  from the optimize path.
-- Add the repeated-tool-call guard in the agent loop (`graph.py`).
-- **Verify:** "optimize this structure" → one job, no VASP card, no duplicate set.
+### Phase C — Optimize = only optimize (V3) + agent guard (BS2) — ✅ DONE 2026-06-19
+- V3: `optimize_structure` now defaults `emit_vasp_inputs=False` — it does only the
+  relaxation of the active structure; VASP inputs are emitted only if explicitly
+  requested. (MD/elastic keep their own flag; only optimize was in scope.)
+- BS2: `graph.py` agent loop now fingerprints each tool call by `(name + args)`
+  and **skips an identical repeat within the same request**, feeding the model a
+  "skipped — use previous result" tool message so it stops looping. Kills the
+  duplicate-job (two job IDs) and runaway-write behaviour from the screenshots.
+- **Verified:** `py_compile` clean; dedup smoke test — identical optimize(full)
+  call skipped, optimize(none) and generate_vasp_inputs (different args/tool)
+  still run.
+- Note: this guards exact duplicates. The agent *also* choosing to call
+  generate_vasp_inputs during an optimize is separately reduced by V3 (no bundled
+  gen) and would need a SYSTEM_PROMPT nudge if it recurs.
 
 ### Phase D — Search browse + columns (S1, S2, S3)
 - S3: map `symmetry.crystal_system` in `mappers.py` (MP); derive crystal system

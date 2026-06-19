@@ -175,6 +175,15 @@ def _result_for_llm(result: dict) -> dict:
     return compact
 
 
+def _call_signature(tc: ToolCall) -> str:
+    """Stable (name + args) fingerprint used to suppress duplicate tool calls (BS2)."""
+    try:
+        args = json.dumps(tc.args or {}, sort_keys=True, default=str)
+    except Exception:  # noqa: BLE001
+        args = str(tc.args)
+    return f"{tc.name}:{args}"
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Tool execution — runs one tool call, emits the SSE side-channel events, and
 # returns the raw result dict (for the [FILES:] payload + LLM feedback).
@@ -280,6 +289,7 @@ async def _agent_loop(
     ]
     step_results: list[dict] = []
     produced_text = False
+    executed_calls: set[str] = set()   # (tool+args) fingerprints already run (BS2)
 
     await queue.put(f"data: {json.dumps({'type': 'status', 'value': THINKING_STATUS})}\n\n")
 
@@ -313,6 +323,29 @@ async def _agent_loop(
         })
 
         for tc in result.tool_calls:
+            sig = _call_signature(tc)
+            if sig in executed_calls:
+                # Identical call already ran in this request — don't repeat it
+                # (prevents duplicate jobs / runaway loops, BS2). Tell the model
+                # so it stops re-issuing and moves on to a final answer.
+                dup = {
+                    "status": "skipped",
+                    "message": (
+                        f"'{tc.name}' was already run with identical arguments in "
+                        "this request — skipping the repeat. Use the previous "
+                        "result instead of calling it again."
+                    ),
+                }
+                await queue.put(f"data: [TOOL_END:{tc.name}:skipped]\n\n")
+                conv.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "name": tc.name,
+                    "content": _result_for_llm(dup),
+                })
+                continue
+            executed_calls.add(sig)
+
             raw = await _execute_tool(
                 tc, queue, session_id, session_dir, user_id, step_results)
             conv.append({
