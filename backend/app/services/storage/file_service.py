@@ -75,6 +75,11 @@ def is_upload_allowed(filename: str) -> bool:
     if name_upper in ALLOWED_UPLOAD_NAMES:
         return True
 
+    # allow VASP structure files named with a suffix, e.g. POSCAR_initial,
+    # POSCAR_final, CONTCAR_relaxed (common when supplying two NEB endpoints).
+    if name_upper.startswith(("POSCAR", "CONTCAR")):
+        return True
+
     # allow known safe extensions
     if ext in ALLOWED_UPLOAD_EXTENSIONS:
         return True

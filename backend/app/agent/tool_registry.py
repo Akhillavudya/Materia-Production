@@ -10,6 +10,7 @@ from app.tools.contracts import (
     AnalyzeSymmetryInput,
     BuildStructureInput,
     ComputeElasticInput,
+    ComputeNebInput,
     ComputePhononInput,
     CreateInterstitialInput,
     CreateSubstitutionInput,
@@ -44,6 +45,7 @@ _TOOL_SPECS = [
     ("compute_elastic_tensor", "Computing elastic properties", ComputeElasticInput),
     ("compute_phonons",       "Computing phonons",            ComputePhononInput),
     ("generate_sqs",          "Generating SQS (ATAT mcsqs)",  GenerateSqsInput),
+    ("compute_neb",           "Computing NEB pathway",        ComputeNebInput),
 ]
 
 

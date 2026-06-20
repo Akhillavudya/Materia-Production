@@ -2,6 +2,7 @@ import { useState } from 'react'
 import FilePanel      from '../files/FilePanel'
 import JobDashboard   from './JobDashboard'
 import AsyncJobsPanel from './AsyncJobsPanel'
+import NebPanel       from './NebPanel'
 
 
 export default function RightPanel({
@@ -9,9 +10,12 @@ export default function RightPanel({
   filePanelRefresh,
   jobRefresh,
   onRerun,
+  onOpenFile,
 }) {
   // which tab is active — 'files' or 'jobs'
   const [activeTab, setActiveTab] = useState('files')
+  // bumped when the NEB panel launches a job, to refresh the jobs list at once
+  const [nebRefresh, setNebRefresh] = useState(0)
 
   return (
     <div style={{
@@ -67,14 +71,20 @@ export default function RightPanel({
           <FilePanel
             sessionId={sessionId}
             refreshTrigger={filePanelRefresh}
+            onOpenFile={onOpenFile}
           />
         ) : (
           <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
-            <AsyncJobsPanel sessionId={sessionId} />
+            <AsyncJobsPanel sessionId={sessionId} refreshSignal={nebRefresh} />
             <JobDashboard
               sessionId={sessionId}
               refreshTrigger={jobRefresh}
               onRerun={onRerun}
+            />
+            <div style={{ flex: 1 }} />
+            <NebPanel
+              sessionId={sessionId}
+              onLaunched={() => setNebRefresh((n) => n + 1)}
             />
           </div>
         )}

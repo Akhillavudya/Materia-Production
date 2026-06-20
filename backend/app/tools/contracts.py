@@ -158,6 +158,37 @@ class ComputePhononInput(BaseModel):
     calculator_model: Optional[str] = Field(None, description=_CALC_MODEL_DESC)
 
 
+# ── NEB compute_neb ───────────────────────────────────────────────────────────
+
+class ComputeNebInput(BaseModel):
+    poscar_name: Optional[str] = Field(
+        None, description="INITIAL-state structure in the session (auto-detects "
+                          "POSCAR if omitted)")
+    final_poscar_name: str = Field(
+        ..., description="FINAL-state structure file in the session (the end point "
+                         "of the hop/migration). Required — NEB needs both states.")
+    n_images: int = Field(
+        7, ge=3, le=15,
+        description="number of interior images between the two endpoints "
+                    "(more = smoother path, slower)")
+    fmax: float = Field(
+        0.05, description="force convergence threshold [eV/Å] for the band")
+    max_steps: int = Field(
+        300, ge=1, le=settings.max_opt_steps,
+        description="maximum NEB optimizer steps")
+    spring_k: float = Field(
+        1.0, description="NEB spring constant [eV/Å²] between images")
+    climb: bool = Field(
+        True, description="use a climbing image to pin the saddle point exactly "
+                          "(recommended for an accurate barrier)")
+    relax_endpoints: bool = Field(
+        True, description="relax both endpoints (ions only) before the NEB so the "
+                          "barrier is measured between true local minima")
+    optimizer: str = Field("FIRE", description='"FIRE" | "BFGS" | "LBFGS"')
+    calculator_type: str = Field("mace", description=_CALC_TYPE_DESC)
+    calculator_model: Optional[str] = Field(None, description=_CALC_MODEL_DESC)
+
+
 # ── 5.7 generate_sqs ──────────────────────────────────────────────────────────
 
 class GenerateSqsInput(BaseModel):

@@ -20,6 +20,17 @@ export async function downloadFile(relPath, fileName) {
   return downloadBlob(`/files/download/${relPath}`, fileName)
 }
 
+/**
+ * Fetch a file as an object URL (for previewing images inline). Caller must
+ * revoke the URL with URL.revokeObjectURL when done to avoid leaks.
+ */
+export async function fetchFileObjectUrl(relPath) {
+  const res = await authRequest(`/files/download/${relPath}`)
+  if (!res.ok) throw new Error(await readError(res, 'Could not load file'))
+  const blob = await res.blob()
+  return URL.createObjectURL(blob)
+}
+
 export async function uploadFiles(sessionId, files) {
   const formData = new FormData()
   for (const file of files) formData.append('files', file)

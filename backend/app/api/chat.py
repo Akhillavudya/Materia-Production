@@ -24,8 +24,10 @@ from app.services.key_service import load_user_keys_into_env
 router = APIRouter()
 logger = get_logger(__name__)
 
-_CONTENT_ALLOWED_EXTS = {"", ".txt", ".log", ".csv", ".sh", ".xml",
-                         ".json", ".cif", ".xyz", ".html"}
+_CONTENT_ALLOWED_EXTS = {"", ".txt", ".log", ".csv", ".tsv", ".sh", ".xml",
+                         ".json", ".cif", ".xyz", ".html", ".py", ".md",
+                         ".yaml", ".yml", ".toml", ".cfg", ".ini", ".dat",
+                         ".in", ".out", ".inp", ".vasp", ".pdb", ".text"}
 _VASP_NAMES = {"POSCAR", "CONTCAR", "INCAR", "KPOINTS",
                "POTCAR", "OSZICAR", "OUTCAR", "XDATCAR"}
 

@@ -46,7 +46,7 @@ This is also exactly how you'll run it on the Oracle server.
 
 ```bash
 # one-time: install the compose plugin (this laptop doesn't have it yet)
-sudo apt-get update && sudo apt-get install -y docker-compose-plugin
+sudo apt-get update && sudo apt-get install -y docker-compose-plugin 
 
 # create a ROOT .env file (NEVER commit it) next to docker-compose.yml:
 cat > .env <<'EOF'

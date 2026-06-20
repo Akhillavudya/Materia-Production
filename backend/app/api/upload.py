@@ -1,13 +1,15 @@
 """File upload endpoints."""
 
+import asyncio
 import uuid
 from typing import List
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_session_for_user
 from app.core.config import settings
+from app.core.context import set_request_identity
 from app.core.limiter import limiter
 from app.core.security import get_current_user
 from app.database.db import get_db
@@ -20,6 +22,7 @@ from app.services.storage.file_service import (
     get_upload_dir,
     is_upload_allowed,
     sanitize_filename,
+    set_session_dir,
 )
 from app.services.structure.activation import (
     StructureParseError,
@@ -149,3 +152,73 @@ async def create_session_and_upload(
     activation = _activate_uploads(
         session.id, [(u["name"], u["rel_path"]) for u in uploaded])
     return {"session_id": session.id, "files": uploaded, "activation": activation}
+
+
+async def _store_endpoint(session_id: str, slot: str, upload: UploadFile):
+    """Store one NEB endpoint upload under a unique, slot-prefixed name.
+
+    Prefixing with the slot guarantees the initial and final files never collide
+    (a common case: both named ``POSCAR``) and that ``find_structure_in_session``
+    resolves each by an exact, unambiguous name.
+    """
+    base = sanitize_filename(upload.filename or f"{slot}_POSCAR")
+    if not is_upload_allowed(base):
+        raise HTTPException(status_code=400,
+                            detail=f"{slot} structure: file type not allowed ({base})")
+    safe = f"neb_{slot}_{base}"
+    content = await upload.read()
+    await upload.close()
+    if _too_large(content):
+        raise HTTPException(status_code=400,
+                            detail=f"{slot} structure exceeds {settings.max_upload_mb} MB limit")
+    dest = get_upload_dir(session_id) / safe
+    dest.write_bytes(content)
+    return safe
+
+
+@router.post("/sessions/{session_id}/neb")
+@limiter.limit("10/minute")
+async def launch_neb(
+    request: Request,
+    session_id: str,
+    initial: UploadFile = File(...),
+    final: UploadFile = File(...),
+    n_images: int = Form(7),
+    calculator_type: str = Form("mace"),
+    calculator_model: str | None = Form(None),
+    climb: bool = Form(True),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Launch an NEB job from two uploaded endpoint structures (UI workflow panel).
+
+    Stores both files in the session, then calls the same ``compute_neb`` tool the
+    agent uses — bypassing chat/file-resolution so the user explicitly picks the
+    initial and final states. Returns the queued-job envelope (job_id) for the
+    dashboard to track.
+    """
+    await get_session_for_user(session_id, current_user, db)
+
+    initial_name = await _store_endpoint(session_id, "initial", initial)
+    final_name = await _store_endpoint(session_id, "final", final)
+
+    from app.tools import material_tools
+
+    def _run():
+        # Async→thread ContextVars don't propagate; set identity explicitly
+        # (same pattern the agent graph uses before invoking a tool).
+        set_session_dir(str(get_session_dir(session_id)))
+        set_request_identity(current_user.id, session_id)
+        return material_tools.compute_neb(
+            poscar_name=initial_name,
+            final_poscar_name=final_name,
+            n_images=int(n_images),
+            calculator_type=calculator_type,
+            calculator_model=calculator_model or None,
+            climb=bool(climb),
+        )
+
+    result = await asyncio.get_running_loop().run_in_executor(None, _run)
+    if isinstance(result, dict) and result.get("status") == "error":
+        raise HTTPException(status_code=400, detail=result.get("message", "NEB launch failed"))
+    return result

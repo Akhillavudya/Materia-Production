@@ -186,7 +186,7 @@ function fileIcon(name) {
   return map[ext] || '📄'
 }
 
-export default function FilePanel({ sessionId, refreshTrigger }) {
+export default function FilePanel({ sessionId, refreshTrigger, onOpenFile }) {
   const [groups, setGroups] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -306,8 +306,9 @@ export default function FilePanel({ sessionId, refreshTrigger }) {
                   </span>
 
                   <span
-                    style={s.fileName}
-                    title={file.name}
+                    style={{ ...s.fileName, cursor: onOpenFile ? 'pointer' : 'default' }}
+                    title={onOpenFile ? `Open ${file.name}` : file.name}
+                    onClick={() => onOpenFile && onOpenFile(file.rel_path, file.name)}
                   >
                     {file.name}
                   </span>

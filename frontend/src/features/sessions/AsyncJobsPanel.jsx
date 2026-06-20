@@ -20,7 +20,14 @@ const STATUS = {
   cancelled: { label: 'Cancelled', color: '#6b7280', bg: '#f9fafb', border: '#e5e7eb' },
 }
 
-const TYPE_LABEL = { optimize: 'Geometry optimization', md: 'Molecular dynamics' }
+const TYPE_LABEL = {
+  optimize: 'Geometry optimization',
+  md: 'Molecular dynamics',
+  elastic: 'Elastic / mechanical',
+  phonon: 'Phonons',
+  sqs: 'SQS (random alloy)',
+  neb: 'NEB migration barrier',
+}
 
 function ProgressBar({ pct }) {
   return (
@@ -35,7 +42,7 @@ function ProgressBar({ pct }) {
   )
 }
 
-export default function AsyncJobsPanel({ sessionId }) {
+export default function AsyncJobsPanel({ sessionId, refreshSignal }) {
   const [jobs, setJobs] = useState([])
   const timer = useRef(null)
 
@@ -45,6 +52,9 @@ export default function AsyncJobsPanel({ sessionId }) {
       setJobs(await listAsyncJobs(sessionId))
     } catch { /* non-critical */ }
   }, [sessionId])
+
+  // Immediate refresh when a job is launched from elsewhere (e.g. the NEB panel).
+  useEffect(() => { if (refreshSignal) load() }, [refreshSignal, load])
 
   useEffect(() => {
     let stopped = false
@@ -116,6 +126,7 @@ export default function AsyncJobsPanel({ sessionId }) {
             {job.status === 'succeeded' && (
               <div style={{ marginTop: 5, fontSize: 11, color: '#166534' }}>
                 {job.result?.final_energy != null ? `E = ${job.result.final_energy} eV · ` : ''}
+                {job.result?.barrier_forward_eV != null ? `barrier = ${job.result.barrier_forward_eV} eV · ` : ''}
                 {artifacts.length} file{artifacts.length !== 1 ? 's' : ''}
               </div>
             )}

@@ -30,6 +30,8 @@ _ARTIFACT_KIND = {
     "bestsqs_out": "data", "rndstr_in": "data", "sqscell_out": "data",
     "parent_cif": "structure", "sublattices_json": "data",
     "bestcorr_out": "data", "mcsqs_progress_csv": "data",
+    "neb_mep": "plot", "neb_path_csv": "data", "neb_traj": "trajectory",
+    "saddle_poscar": "structure",
 }
 
 
@@ -149,6 +151,22 @@ def _run(job_id: str, job_type: JobType) -> None:
                 time_budget_s=params.get("time_budget_s", 600),
                 progress_callback=reporter,
             )
+        elif job_type is JobType.NEB:
+            from app.services.simulation.neb import run_neb
+            result = run_neb(
+                poscar_path=spec["poscar_path"],
+                final_poscar_path=params["final_poscar_path"],
+                output_dir=spec["output_dir"],
+                n_images=params.get("n_images", 7),
+                fmax=params.get("fmax", 0.05),
+                max_steps=params.get("max_steps", 300),
+                spring_k=params.get("spring_k", 1.0),
+                climb=params.get("climb", True),
+                relax_endpoints=params.get("relax_endpoints", True),
+                optimizer=params.get("optimizer", "FIRE"),
+                calculator=calc,
+                progress_callback=reporter,
+            )
         else:
             raise ValueError(f"Unknown job type: {job_type}")
     except Exception as exc:  # noqa: BLE001 — any failure → job failed, not a crash
@@ -220,3 +238,8 @@ def run_phonon_job(self, job_id: str) -> None:      # noqa: ARG001
 @celery_app.task(name="jobs.sqs", bind=True)
 def run_sqs_job(self, job_id: str) -> None:         # noqa: ARG001
     _run(job_id, JobType.SQS)
+
+
+@celery_app.task(name="jobs.neb", bind=True)
+def run_neb_job(self, job_id: str) -> None:         # noqa: ARG001
+    _run(job_id, JobType.NEB)

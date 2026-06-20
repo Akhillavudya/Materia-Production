@@ -78,8 +78,16 @@ function blankAssistant() {
   }
 }
 
+function timeGreeting() {
+  const h = new Date().getHours()
+  if (h < 12) return 'Good morning'
+  if (h < 18) return 'Good afternoon'
+  return 'Good evening'
+}
+
 export default function Chat({
   sessionId,
+  userName,
   initialMessages,
   onSessionCreated,
   onFilesGenerated,
@@ -360,6 +368,91 @@ export default function Chat({
   }
 
   const canSend = input.trim().length > 0 && !streaming
+  const isEmpty = messages.length === 0
+  const firstName = (userName || '').trim().split(/[\s@]/)[0]
+
+  // The composer "pill" is reused in two places: centered on the new-chat
+  // welcome screen, and pinned to the bottom once a conversation is going.
+  const composer = (
+    <div style={{
+      display: 'flex', alignItems: 'flex-end', gap: '0',
+      background: '#ffffff', border: '1px solid var(--border)',
+      borderRadius: 'var(--radius-xl)', padding: '10px 10px 10px 16px',
+      boxShadow: '0 2px 8px rgba(0,0,0,0.06)', transition: 'border-color 0.15s, box-shadow 0.15s',
+    }}
+    onFocusCapture={e => {
+      e.currentTarget.style.borderColor = '#a5b4fc'
+      e.currentTarget.style.boxShadow = '0 2px 12px rgba(99,102,241,0.12)'
+    }}
+    onBlurCapture={e => {
+      e.currentTarget.style.borderColor = 'var(--border)'
+      e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.06)'
+    }}
+    >
+      <UploadButton
+        sessionId={sessionId}
+        onUploadDone={handleUploadDone}
+        onSessionCreated={onSessionCreated}
+        disabled={streaming}
+      />
+
+      <textarea
+        ref={textareaRef}
+        value={input}
+        onChange={e => { setInput(e.target.value); resizeTextarea() }}
+        onKeyDown={handleKeyDown}
+        placeholder="Message Materia..."
+        rows={1}
+        disabled={streaming}
+        style={{
+          flex: 1, resize: 'none', border: 'none', outline: 'none',
+          background: 'transparent', fontSize: '15px', lineHeight: '1.5',
+          color: 'var(--text-primary)', fontFamily: 'var(--font)',
+          minHeight: '24px', maxHeight: '180px', overflowY: 'auto', padding: '2px 0',
+        }}
+      />
+
+      <button
+        onClick={streaming ? stopGeneration : () => sendMessage()}
+        disabled={!streaming && !canSend}
+        title={streaming ? 'Stop generation' : 'Send message'}
+        style={{
+        width: '34px', height: '34px', borderRadius: '50%',
+        background: streaming ? '#111827' : canSend ? '#6366f1' : 'var(--border)', border: 'none',
+        color: streaming || canSend ? '#ffffff' : 'var(--text-muted)',
+        cursor: streaming || canSend ? 'pointer' : 'not-allowed',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: streaming ? '10px' : '16px', flexShrink: 0, transition: 'all 0.15s',
+        transform: streaming || canSend ? 'scale(1)' : 'scale(0.95)',
+      }}>
+        {streaming ? '■' : '↑'}
+      </button>
+    </div>
+  )
+
+  const suggestionChips = (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'center' }}>
+      {SUGGESTIONS.map(chip => (
+        <button key={chip} onClick={() => sendMessage(chip)} style={{
+          padding: '9px 16px', background: '#ffffff',
+          border: '1px solid var(--border)', borderRadius: '20px',
+          fontSize: '13px', color: 'var(--text-secondary)',
+          cursor: 'pointer', fontFamily: 'var(--font)', transition: 'all 0.15s',
+        }}
+        onMouseEnter={e => {
+          e.currentTarget.style.background = 'var(--hover-bg)'
+          e.currentTarget.style.borderColor = '#d1cec7'
+          e.currentTarget.style.color = 'var(--text-primary)'
+        }}
+        onMouseLeave={e => {
+          e.currentTarget.style.background = '#ffffff'
+          e.currentTarget.style.borderColor = 'var(--border)'
+          e.currentTarget.style.color = 'var(--text-secondary)'
+        }}
+        >{chip}</button>
+      ))}
+    </div>
+  )
 
   return (
     <div style={{
@@ -409,47 +502,24 @@ export default function Chat({
       {/* ── message list ── */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '32px 0' }}>
 
-        {/* empty state */}
-        {messages.length === 0 && (
+        {/* new-chat welcome — centered greeting + composer (Claude-style) */}
+        {isEmpty && (
           <div style={{
-            maxWidth: '600px', margin: '0 auto',
-            padding: '60px 40px 0', textAlign: 'center',
+            minHeight: '72vh', display: 'flex', flexDirection: 'column',
+            justifyContent: 'center', alignItems: 'center',
+            maxWidth: '720px', margin: '0 auto', padding: '0 24px',
           }}>
-            <div style={{ width: 'fit-content', margin: '0 auto 20px' }}>
-              <LogoMark size={52} radius={14} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '28px' }}>
+              <LogoMark size={36} radius={10} />
+              <h1 style={{
+                fontSize: '30px', fontWeight: 600, color: 'var(--text-primary)',
+                letterSpacing: '-0.02em', margin: 0,
+              }}>
+                {timeGreeting()}{firstName ? `, ${firstName}` : ''}
+              </h1>
             </div>
-            <h1 style={{
-              fontSize: '22px', fontWeight: '600', color: 'var(--text-primary)',
-              marginBottom: '8px', letterSpacing: '-0.02em',
-            }}>How can I help you today?</h1>
-            <p style={{
-              fontSize: '15px', color: 'var(--text-secondary)',
-              marginBottom: '32px', lineHeight: '1.6',
-            }}>
-              I can generate POSCAR files, run DFT workflows,
-              simulate structures with MLPs, and more.
-            </p>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'center' }}>
-              {SUGGESTIONS.map(chip => (
-                <button key={chip} onClick={() => sendMessage(chip)} style={{
-                  padding: '9px 16px', background: '#ffffff',
-                  border: '1px solid var(--border)', borderRadius: '20px',
-                  fontSize: '13px', color: 'var(--text-secondary)',
-                  cursor: 'pointer', fontFamily: 'var(--font)', transition: 'all 0.15s',
-                }}
-                onMouseEnter={e => {
-                  e.currentTarget.style.background = 'var(--hover-bg)'
-                  e.currentTarget.style.borderColor = '#d1cec7'
-                  e.currentTarget.style.color = 'var(--text-primary)'
-                }}
-                onMouseLeave={e => {
-                  e.currentTarget.style.background = '#ffffff'
-                  e.currentTarget.style.borderColor = 'var(--border)'
-                  e.currentTarget.style.color = 'var(--text-secondary)'
-                }}
-                >{chip}</button>
-              ))}
-            </div>
+            <div style={{ width: '100%' }}>{composer}</div>
+            <div style={{ marginTop: '20px' }}>{suggestionChips}</div>
           </div>
         )}
 
@@ -581,72 +651,20 @@ export default function Chat({
         </div>
       </div>
 
-      {/* ── input area ── */}
-      <div style={{
-        padding: '16px 40px 24px', background: 'var(--bg-chat)',
-        flexShrink: 0, maxWidth: '760px', width: '100%',
-        margin: '0 auto', boxSizing: 'border-box',
-      }}>
+      {/* ── input area (bottom — only once a conversation is going) ── */}
+      {!isEmpty && (
         <div style={{
-          display: 'flex', alignItems: 'flex-end', gap: '0',
-          background: '#ffffff', border: '1px solid var(--border)',
-          borderRadius: 'var(--radius-xl)', padding: '10px 10px 10px 16px',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.06)', transition: 'border-color 0.15s, box-shadow 0.15s',
-        }}
-        onFocusCapture={e => {
-          e.currentTarget.style.borderColor = '#a5b4fc'
-          e.currentTarget.style.boxShadow = '0 2px 12px rgba(99,102,241,0.12)'
-        }}
-        onBlurCapture={e => {
-          e.currentTarget.style.borderColor = 'var(--border)'
-          e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.06)'
-        }}
-        >
-          <UploadButton
-            sessionId={sessionId}
-            onUploadDone={handleUploadDone}
-            onSessionCreated={onSessionCreated}
-            disabled={streaming}
-          />
-
-          <textarea
-            ref={textareaRef}
-            value={input}
-            onChange={e => { setInput(e.target.value); resizeTextarea() }}
-            onKeyDown={handleKeyDown}
-            placeholder="Message Materia..."
-            rows={1}
-            disabled={streaming}
-            style={{
-              flex: 1, resize: 'none', border: 'none', outline: 'none',
-              background: 'transparent', fontSize: '15px', lineHeight: '1.5',
-              color: 'var(--text-primary)', fontFamily: 'var(--font)',
-              minHeight: '24px', maxHeight: '180px', overflowY: 'auto', padding: '2px 0',
-            }}
-          />
-
-          <button
-            onClick={streaming ? stopGeneration : () => sendMessage()}
-            disabled={!streaming && !canSend}
-            title={streaming ? 'Stop generation' : 'Send message'}
-            style={{
-            width: '34px', height: '34px', borderRadius: '50%',
-            background: streaming ? '#111827' : canSend ? '#6366f1' : 'var(--border)', border: 'none',
-            color: streaming || canSend ? '#ffffff' : 'var(--text-muted)',
-            cursor: streaming || canSend ? 'pointer' : 'not-allowed',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: streaming ? '10px' : '16px', flexShrink: 0, transition: 'all 0.15s',
-            transform: streaming || canSend ? 'scale(1)' : 'scale(0.95)',
-          }}>
-            {streaming ? '■' : '↑'}
-          </button>
+          padding: '16px 40px 24px', background: 'var(--bg-chat)',
+          flexShrink: 0, maxWidth: '760px', width: '100%',
+          margin: '0 auto', boxSizing: 'border-box',
+        }}>
+          {composer}
+          <div style={{
+            textAlign: 'center', marginTop: '8px',
+            fontSize: '11px', color: 'var(--text-muted)',
+          }}>Shift + Enter for new line</div>
         </div>
-
-        <div style={{
-          textAlign: 'center', marginTop: '8px',
-          fontSize: '11px', color: 'var(--text-muted)',
-        }}>Shift + Enter for new line</div>
-      </div>
+      )}
 
       {/* ── global keyframe for spinner ── */}
       <style>{`

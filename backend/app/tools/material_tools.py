@@ -1453,3 +1453,95 @@ def generate_sqs(
         emit_vasp_inputs=False,
     )
     return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TOOL — compute_neb  (NEB migration barrier; ML potential)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def compute_neb(
+    poscar_name:       Optional[str] = None,
+    final_poscar_name: Optional[str] = None,
+    n_images:          int           = 7,
+    fmax:              float         = 0.05,
+    max_steps:         int           = 300,
+    spring_k:          float         = 1.0,
+    climb:             bool          = True,
+    relax_endpoints:   bool          = True,
+    optimizer:         str           = "FIRE",
+    calculator_type:   str           = "mace",
+    calculator_model:  Optional[str] = None,
+) -> dict:
+    """Queue an NEB job: find the migration barrier between two endpoint states.
+
+    Takes an INITIAL and a FINAL structure (both already in the session),
+    interpolates a band of images, and relaxes it with the ML potential to the
+    minimum-energy path — returning the forward/reverse activation barrier and a
+    path plot. Long-running, so this enqueues a job and returns a ``job_id``.
+    """
+    if not final_poscar_name:
+        return {"status": "error",
+                "message": "compute_neb needs final_poscar_name — the end-state "
+                           "structure of the hop. Generate it first (e.g. move the "
+                           "migrating atom), then call NEB with both files."}
+
+    n_images = min(max(int(n_images), 3), 15)
+    fmax = max(float(fmax), 0.001)
+    max_steps = min(max(int(max_steps), 1), settings.max_opt_steps)
+    spring_k = max(float(spring_k), 0.01)
+
+    try:
+        initial_path = find_structure_in_session(poscar_name, prefer_contcar=False)
+    except FileNotFoundError as e:
+        return {"status": "error", "message": f"Initial structure: {e}"}
+    try:
+        final_path = find_structure_in_session(final_poscar_name, prefer_contcar=False)
+    except FileNotFoundError as e:
+        return {"status": "error", "message": f"Final structure: {e}"}
+
+    if initial_path.resolve() == final_path.resolve():
+        return {"status": "error",
+                "message": "Initial and final structures are the same file — NEB "
+                           "needs two distinct end states."}
+
+    # Atom cap applies to one image (all images share the same composition).
+    try:
+        from pymatgen.core import Structure
+        n_atoms = len(Structure.from_file(str(initial_path)))
+        if n_atoms > settings.max_atoms:
+            return {
+                "status": "error",
+                "message": (
+                    f"This structure has {n_atoms} atoms, above the "
+                    f"{settings.max_atoms}-atom limit on this server. "
+                    "Use a smaller supercell for the migration cell."
+                ),
+            }
+    except Exception:  # noqa: BLE001 — let the worker surface a real parse error
+        pass
+
+    calc_cfg = _resolve_calculator(calculator_type, calculator_model)
+    if calc_cfg.get("status") == "error":
+        return calc_cfg
+
+    result = _enqueue_job(
+        JobType.NEB,
+        poscar_path=initial_path,
+        output_dir=session_path() / "neb",
+        params={
+            "final_poscar_path": str(final_path),
+            "n_images": n_images,
+            "fmax": fmax,
+            "max_steps": max_steps,
+            "spring_k": spring_k,
+            "climb": bool(climb),
+            "relax_endpoints": bool(relax_endpoints),
+            "optimizer": str(optimizer),
+        },
+        calculator=calc_cfg,
+        emit_vasp_inputs=False,
+    )
+    if result.get("status") == "queued":
+        result["calculator"] = calc_cfg
+        result["message"] = f"{result['message']} Using {_calc_label(calc_cfg)}."
+    return result

@@ -215,6 +215,63 @@ def generate_optimization_plot(
             "convergence_b64": _to_b64(png)}
 
 
+def generate_neb_plot(
+    path_csv:   str,
+    output_dir: str,
+    title:      Optional[str] = None,
+) -> dict:
+    """Plot the NEB minimum-energy path (MEP): energy vs reaction coordinate.
+
+    Reads ``neb_path.csv`` (columns: image, reaction_coord_A, energy_eV,
+    delta_E_eV) and writes ``neb_mep.png`` — ΔE (relative to the initial state)
+    against the reaction coordinate, with the saddle (highest) image marked and
+    the forward barrier annotated. Returns {status, mep_png, mep_b64}.
+    """
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return {"status": "error", "message": "matplotlib not installed", "mep_png": None}
+
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    rc_data = _read_csv(path_csv, x_col="reaction_coord_A", y_col="delta_E_eV")
+    if not rc_data["x"]:
+        return {"status": "error", "message": "NEB path CSV empty or missing",
+                "mep_png": None}
+
+    x, y = rc_data["x"], rc_data["y"]
+    saddle = max(range(len(y)), key=lambda i: y[i])
+    barrier = y[saddle] - y[0]
+
+    _apply_style(plt)
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+
+    ax.plot(x, y, color="#2563EB", linewidth=1.8, marker="o", markersize=5,
+            label="MEP (ΔE)")
+    ax.plot(x[saddle], y[saddle], marker="*", markersize=16, color="#DC2626",
+            linestyle="none", label=f"Saddle (barrier {barrier:.3f} eV)")
+    ax.annotate(f"{barrier:.3f} eV", xy=(x[saddle], y[saddle]),
+                xytext=(0, 10), textcoords="offset points",
+                ha="center", fontsize=10, color="#DC2626", fontweight="bold")
+    ax.axhline(y=0.0, color="#94A3B8", linewidth=1.0, linestyle=":")
+
+    ax.set_xlabel("Reaction coordinate (Å)", fontsize=11)
+    ax.set_ylabel("ΔEnergy (eV)", fontsize=11)
+    ax.set_title(f"{title + ' — ' if title else ''}NEB minimum-energy path",
+                 fontsize=12)
+    ax.legend(fontsize=9, framealpha=0.6)
+    ax.grid(True, linestyle=":", alpha=0.5)
+
+    fig.tight_layout()
+    png = str(out_dir / "neb_mep.png")
+    fig.savefig(png, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return {"status": "ok", "mep_png": png, "mep_b64": _to_b64(png)}
+
+
 # ── Private: plot helpers ─────────────────────────────────────────────────────
 
 def _plot_energy(ax, data: dict, title: Optional[str] = None):

@@ -5,6 +5,7 @@ import RightPanel from './features/sessions/RightPanel'
 import AuthScreen from './features/auth/AuthScreen'
 import Landing from './features/landing/Landing'
 import SettingsPanel from './features/settings/SettingsPanel'
+import FileViewer from './features/files/FileViewer'
 import { fetchMessages, getAuthToken, getMe, getStoredUser, logout } from './api'
 
 export default function App() {
@@ -19,6 +20,9 @@ export default function App() {
   // logged-out view: 'landing' (marketing page) or 'auth' (sign in / sign up)
   const [authView, setAuthView] = useState('landing')
   const [showSettings, setShowSettings] = useState(false)
+  // when set, a file is open full-width: { relPath, fileName }. Sidebar + right
+  // panel hide so the viewer sits beside the chat (Claude-style focused view).
+  const [viewingFile, setViewingFile] = useState(null)
 
   useEffect(() => {
     if (!getAuthToken()) return
@@ -135,17 +139,20 @@ export default function App() {
       overflow: 'hidden',
       background: 'var(--bg-page)',
     }}>
-      <Sidebar
-        activeSessionId={activeSessionId}
-        onSelectSession={handleSelectSession}
-        onNewChat={handleNewChat}
-        user={user}
-        onSignOut={handleSignOut}
-        onOpenSettings={() => setShowSettings(true)}
-      />
+      {!viewingFile && (
+        <Sidebar
+          activeSessionId={activeSessionId}
+          onSelectSession={handleSelectSession}
+          onNewChat={handleNewChat}
+          user={user}
+          onSignOut={handleSignOut}
+          onOpenSettings={() => setShowSettings(true)}
+        />
+      )}
 
       <Chat
         sessionId={activeSessionId}
+        userName={user?.full_name || user?.email}
         initialMessages={loadedMessages}
         onSessionCreated={handleSessionCreated}
         onFilesGenerated={handleFilesGenerated}
@@ -154,12 +161,21 @@ export default function App() {
         onRerunConsumed={handleRerunConsumed}
       />
 
-      <RightPanel
-        sessionId={activeSessionId}
-        filePanelRefresh={filePanelRefresh}
-        jobRefresh={jobRefresh}
-        onRerun={handleRerun}
-      />
+      {viewingFile ? (
+        <FileViewer
+          relPath={viewingFile.relPath}
+          fileName={viewingFile.fileName}
+          onClose={() => setViewingFile(null)}
+        />
+      ) : activeSessionId ? (
+        <RightPanel
+          sessionId={activeSessionId}
+          filePanelRefresh={filePanelRefresh}
+          jobRefresh={jobRefresh}
+          onRerun={handleRerun}
+          onOpenFile={(relPath, fileName) => setViewingFile({ relPath, fileName })}
+        />
+      ) : null}
 
       {showSettings && (
         <SettingsPanel onClose={() => setShowSettings(false)} />

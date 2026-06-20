@@ -48,3 +48,10 @@ generated/
 .DS_Store
 .idea/
 .vscode/
+
+# root-level scratch structure files (test artifacts — never commit)
+/POSCAR
+/POSCAR_*
+/CONTCAR
+/CONTCAR_*
+/*.cif
