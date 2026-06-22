@@ -490,10 +490,8 @@ def generate_poscar(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# TOOL — build_structure  (combined structure transforms; Step 5.5)
+# TOOLS — make_supercell / add_vacuum / make_slab / convert_structure (Step 5.5)
 # ─────────────────────────────────────────────────────────────────────────────
-
-_BUILD_OPERATIONS = {"make_supercell", "add_vacuum", "make_slab", "convert"}
 
 
 def _build_tag(operation: str, *, scaling=None, axis=None, miller=None):
@@ -513,26 +511,15 @@ def _build_tag(operation: str, *, scaling=None, axis=None, miller=None):
 
 
 def _predicted_supercell_atoms(n_atoms: int, scaling) -> Optional[int]:
-    """Atoms a supercell *would* have, for a pre-build cap check (BS3). None if unparsable."""
+    """Atoms a supercell *would* have, for a pre-build cap check. None if unparsable.
+
+    Delegates to ``builder.supercell_multiplier`` so it covers every scaling
+    variety (uniform / per-axis / 3×3 matrix) and never drifts from make_supercell.
+    """
     try:
-        nums = [int(v) for v in str(scaling or "").replace(",", " ").split()]
-    except ValueError:
+        return n_atoms * builder.supercell_multiplier(scaling)
+    except (ValueError, TypeError):
         return None
-    if len(nums) == 1:
-        nums = nums * 3
-    if len(nums) != 3 or any(v < 1 for v in nums):
-        return None
-    return n_atoms * nums[0] * nums[1] * nums[2]
-
-
-def _ignored_param_warnings(op: str, *, scaling, miller) -> list[str]:
-    """Warn when a param that doesn't apply to `op` was supplied (BS4)."""
-    warns: list[str] = []
-    if scaling and op != "make_supercell":
-        warns.append(f"`scaling` only applies to make_supercell — ignored for {op}.")
-    if str(miller or "").strip() not in ("", "1 1 1") and op != "make_slab":
-        warns.append(f"`miller` only applies to make_slab — ignored for {op}.")
-    return warns
 
 
 def _resolve_build_input(material_id, source, poscar_path):
@@ -575,119 +562,170 @@ def _convert_structure(structure, to_format: str) -> dict:
     }
 
 
-def build_structure(
-    operation:   str,
-    material_id: Optional[str] = None,
-    source:      Optional[str] = None,
-    poscar_path: Optional[str] = None,
-    scaling:     Optional[str] = None,
-    axis:        str           = "c",
-    thickness:   float         = 15.0,
-    center:      bool          = True,
-    miller:      str           = "1 1 1",
-    min_slab_size:  float      = 10.0,
-    min_vacuum_size: float     = 15.0,
-    lll_reduce:  bool          = True,
-    shift:       float         = 0.0,
-    to_format:   str           = "cif",
-) -> dict:
-    """Transform a crystal structure and save the result as the active POSCAR.
+def _finish_build(result, operation: str, n_before: int, *, tag, detail: str) -> dict:
+    """Cap-check, write the result as the active POSCAR, return a uniform envelope.
 
-    Operations (selected by `operation`):
-      - make_supercell: replicate the cell, e.g. scaling="2 2 1" or "2".
-      - add_vacuum: add `thickness` Å of vacuum along `axis` (a/b/c), optionally
-        centering the atoms — for 2D layers, molecules, or padding a slab.
-      - make_slab: cut a surface along `miller` (e.g. "1 1 1") with `min_slab_size`
-        and `min_vacuum_size` Å. Vacuum is included — do NOT also call add_vacuum.
-      - convert: write the structure in another format (`to_format`: poscar | cif |
-        xyz | cssr | json). Does NOT change the active POSCAR.
-
-    Operates on the active session structure by default; pass `poscar_path` for a
-    specific session file or `material_id` (+ `source`) to fetch one from a database.
-    Writes ``POSCAR`` + ``POSCAR_<formula>`` so the result chains into the next tool.
+    Shared by make_supercell / add_vacuum / make_slab. `detail` is the
+    operation-specific phrase for the success message; `tag` labels the saved
+    ``POSCAR_<formula>`` copy.
     """
-    op = (operation or "").lower().strip()
-    if op not in _BUILD_OPERATIONS:
-        return {"status": "error",
-                "message": (f"Invalid operation '{operation}'. Use: "
-                            f"{' | '.join(sorted(_BUILD_OPERATIONS))}.")}
-
-    try:
-        structure = _resolve_build_input(material_id, source, poscar_path)
-    except _StructureError as e:
-        return {"status": "error", "message": str(e)}
-
-    # convert is special — it writes a format file, not the active POSCAR.
-    if op == "convert":
-        return _convert_structure(structure, to_format)
-
-    n_before = len(structure)
-    warnings = _ignored_param_warnings(op, scaling=scaling, miller=miller)   # BS4
-
-    # BS3: reject an oversized supercell BEFORE building it (cheap + deterministic).
-    if op == "make_supercell":
-        predicted = _predicted_supercell_atoms(n_before, scaling)
-        if predicted and predicted > settings.max_atoms:
-            return {"status": "error",
-                    "message": (f"A '{scaling}' supercell of this {n_before}-atom cell "
-                                f"would be {predicted} atoms, above the "
-                                f"{settings.max_atoms}-atom limit. Use a smaller scaling.")}
-
-    try:
-        if op == "make_supercell":
-            result = builder.make_supercell(structure, scaling)
-        elif op == "add_vacuum":
-            result = builder.add_vacuum(structure, axis=axis, thickness=thickness,
-                                        center=center)
-        elif op == "make_slab":
-            result = builder.make_slab(structure, miller=miller,
-                                       min_slab_size=min_slab_size,
-                                       min_vacuum_size=min_vacuum_size,
-                                       center_slab=center, lll_reduce=lll_reduce,
-                                       shift=shift)
-        else:  # pragma: no cover - guarded by _BUILD_OPERATIONS
-            return {"status": "error", "message": f"Operation '{op}' is not implemented."}
-    except Exception as e:  # noqa: BLE001 — surface a friendly message
-        return {"status": "error", "message": f"{op} failed: {e}"}
-
     if len(result) > settings.max_atoms:
         return {"status": "error",
                 "message": (f"The result has {len(result)} atoms, above the "
                             f"{settings.max_atoms}-atom limit on this server. "
-                            "Use a smaller scaling factor.")}
+                            "Use smaller parameters.")}
 
     formula = result.composition.reduced_formula
-    tag = _build_tag(op, scaling=scaling, axis=axis, miller=miller)
     try:
         wp = write_poscar(result, session_dir(), name=formula, tag=tag)
     except Exception as e:  # noqa: BLE001
         return {"status": "error", "message": f"Could not write the structure: {e}"}
 
-    abc = [round(x, 4) for x in result.lattice.abc]
-    if op == "make_supercell":
-        detail = f"now has {len(result)} atoms (was {n_before})"
-    elif op == "add_vacuum":
-        detail = f"vacuum added along {axis} → lattice abc = {abc} Å"
-    elif op == "make_slab":
-        detail = f"({miller}) slab with {len(result)} atoms, abc = {abc} Å"
-    else:  # pragma: no cover
-        detail = f"now has {len(result)} atoms"
-
-    warn_note = f" Note: {' '.join(warnings)}" if warnings else ""
     return {
         "status":         "success",
-        "operation":      op,
+        "operation":      operation,
         "formula":        formula,
         "n_sites_before": n_before,
         "n_sites":        len(result),
-        "lattice_abc":    abc,
+        "lattice_abc":    [round(x, 4) for x in result.lattice.abc],
         "files_written":  wp["files_written"],
-        "warnings":       warnings,
         "message": (
-            f"{op}: {formula} {detail}. "
-            f"Wrote {wp['files_written'][-1]} (active as POSCAR) for the next step.{warn_note}"
+            f"{operation}: {formula} {detail}. "
+            f"Wrote {wp['files_written'][-1]} (active as POSCAR) for the next step."
         ),
     }
+
+
+def make_supercell(
+    scaling:     str,
+    material_id: Optional[str] = None,
+    source:      Optional[str] = None,
+    poscar_path: Optional[str] = None,
+) -> dict:
+    """Replicate a crystal cell into a supercell and save it as the active POSCAR.
+
+    `scaling` sizes the cell, e.g. "2 2 1" (per-axis) or "2" (uniform 2×2×2).
+    Operates on the active session structure by default; pass `poscar_path` for a
+    specific session file or `material_id` (+ `source`) to fetch one from a database.
+    Writes ``POSCAR`` + ``POSCAR_<formula>`` so the result chains into the next tool.
+    """
+    try:
+        structure = _resolve_build_input(material_id, source, poscar_path)
+    except _StructureError as e:
+        return {"status": "error", "message": str(e)}
+
+    n_before = len(structure)
+    # Reject an oversized supercell BEFORE building it (cheap + deterministic).
+    predicted = _predicted_supercell_atoms(n_before, scaling)
+    if predicted and predicted > settings.max_atoms:
+        return {"status": "error",
+                "message": (f"A '{scaling}' supercell of this {n_before}-atom cell "
+                            f"would be {predicted} atoms, above the "
+                            f"{settings.max_atoms}-atom limit. Use a smaller scaling.")}
+
+    try:
+        result = builder.make_supercell(structure, scaling)
+    except Exception as e:  # noqa: BLE001
+        return {"status": "error", "message": f"make_supercell failed: {e}"}
+
+    tag = _build_tag("make_supercell", scaling=scaling)
+    detail = f"now has {len(result)} atoms (was {n_before})"
+    return _finish_build(result, "make_supercell", n_before, tag=tag, detail=detail)
+
+
+def add_vacuum(
+    axis:        str   = "c",
+    thickness:   float = 15.0,
+    side:        str   = "both",
+    material_id: Optional[str] = None,
+    source:      Optional[str] = None,
+    poscar_path: Optional[str] = None,
+) -> dict:
+    """Set the vacuum gap along one axis to exactly `thickness` Å (active POSCAR).
+
+    Resizes the cell so the gap to the next periodic image is exactly `thickness`
+    Å along `axis` ("a"/"b"/"c") — independent of any existing padding. `side`
+    places the slab: "both" (centred, default), "top" (all vacuum above), or
+    "bottom" (all vacuum below). For 2D layers, molecules, or padding a slab.
+    (make_slab already includes vacuum, so do NOT call this on a slab it produced.)
+    Operates on the active session structure by default; pass `poscar_path` for a
+    specific session file or `material_id` (+ `source`) to fetch one from a database.
+    """
+    try:
+        structure = _resolve_build_input(material_id, source, poscar_path)
+    except _StructureError as e:
+        return {"status": "error", "message": str(e)}
+
+    n_before = len(structure)
+    try:
+        result = builder.add_vacuum(structure, axis=axis, thickness=thickness,
+                                    side=side)
+    except Exception as e:  # noqa: BLE001
+        return {"status": "error", "message": f"add_vacuum failed: {e}"}
+
+    abc = [round(x, 4) for x in result.lattice.abc]
+    tag = _build_tag("add_vacuum", axis=axis)
+    detail = f"{thickness} Å vacuum on {side} along {axis} → lattice abc = {abc} Å"
+    return _finish_build(result, "add_vacuum", n_before, tag=tag, detail=detail)
+
+
+def make_slab(
+    miller:          str   = "1 1 1",
+    min_slab_size:   float = 10.0,
+    min_vacuum_size: float = 15.0,
+    center:          bool  = True,
+    lll_reduce:      bool  = True,
+    shift:           float = 0.0,
+    material_id:     Optional[str] = None,
+    source:          Optional[str] = None,
+    poscar_path:     Optional[str] = None,
+) -> dict:
+    """Cut a surface slab along a Miller index and save it as the active POSCAR.
+
+    Cuts along `miller` (e.g. "1 1 1") with `min_slab_size` and `min_vacuum_size`
+    Å. Vacuum is INCLUDED in the result — do NOT also call add_vacuum. `shift`
+    selects which surface termination; `lll_reduce` reduces the slab cell.
+    Operates on the active session structure by default; pass `poscar_path` for a
+    specific session file or `material_id` (+ `source`) to fetch one from a database.
+    """
+    try:
+        structure = _resolve_build_input(material_id, source, poscar_path)
+    except _StructureError as e:
+        return {"status": "error", "message": str(e)}
+
+    n_before = len(structure)
+    try:
+        result = builder.make_slab(structure, miller=miller,
+                                   min_slab_size=min_slab_size,
+                                   min_vacuum_size=min_vacuum_size,
+                                   center_slab=center, lll_reduce=lll_reduce,
+                                   shift=shift)
+    except Exception as e:  # noqa: BLE001
+        return {"status": "error", "message": f"make_slab failed: {e}"}
+
+    abc = [round(x, 4) for x in result.lattice.abc]
+    tag = _build_tag("make_slab", miller=miller)
+    detail = f"({miller}) slab with {len(result)} atoms, abc = {abc} Å"
+    return _finish_build(result, "make_slab", n_before, tag=tag, detail=detail)
+
+
+def convert_structure(
+    to_format:   str = "cif",
+    material_id: Optional[str] = None,
+    source:      Optional[str] = None,
+    poscar_path: Optional[str] = None,
+) -> dict:
+    """Write a structure in another file format. Does NOT change the active POSCAR.
+
+    `to_format` is one of: poscar | cif | xyz | cssr | json. Operates on the active
+    session structure by default; pass `poscar_path` for a specific session file or
+    `material_id` (+ `source`) to fetch one from a database.
+    """
+    try:
+        structure = _resolve_build_input(material_id, source, poscar_path)
+    except _StructureError as e:
+        return {"status": "error", "message": str(e)}
+    return _convert_structure(structure, to_format)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

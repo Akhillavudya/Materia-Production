@@ -224,38 +224,54 @@ class GeneratePoscarInput(BaseModel):
         None, description="existing session structure file to convert to a POSCAR")
 
 
-# ── 14.9 build_structure (Step 5.5) ───────────────────────────────────────────
+# ── 14.9 structure builders (Step 5.5) ────────────────────────────────────────
 
-class BuildStructureInput(BaseModel):
-    operation: str = Field(
-        ...,
-        description='"make_supercell" | "add_vacuum" | "make_slab" | "convert"')
+class _StructureSourceInput(BaseModel):
+    """Shared structure-resolution args: active session POSCAR by default, or a
+    specific session file / database material."""
     material_id: Optional[str] = Field(
-        None, description="optional: fetch + transform a database structure instead of a session file")
+        None, description="optional: use a database structure instead of a session file")
     source: Optional[str] = Field(
         None, description='"mp" | "c2db" | "oqmd" (paired with material_id)')
     poscar_path: Optional[str] = Field(
-        None, description="session structure to transform (defaults to the active POSCAR)")
-    scaling: Optional[str] = Field(
-        None, description='[make_supercell] supercell size, e.g. "2 2 1" or "2"')
+        None, description="session structure to use (defaults to the active POSCAR)")
+
+
+class MakeSupercellInput(_StructureSourceInput):
+    scaling: str = Field(
+        ...,
+        description=('supercell size: "2" (uniform 2x2x2), "2 2 1" (per-axis), or '
+                     '9 numbers for a 3x3 matrix "2 0 0 0 2 0 0 0 1" (rotated cell)'))
+
+
+class AddVacuumInput(_StructureSourceInput):
     axis: str = Field(
-        "c", description='[add_vacuum] axis to add vacuum along: "a" | "b" | "c"')
+        "c", description='axis to add vacuum along: "a" | "b" | "c"')
     thickness: float = Field(
-        15.0, description="[add_vacuum] vacuum thickness in Å")
-    center: bool = Field(
-        True, description="[add_vacuum / make_slab] recenter atoms within the cell")
+        15.0, description="exact vacuum gap in Å (independent of existing padding)")
+    side: str = Field(
+        "both",
+        description='where to place the vacuum: "both" (centred) | "top" | "bottom"')
+
+
+class MakeSlabInput(_StructureSourceInput):
     miller: str = Field(
-        "1 1 1", description='[make_slab] Miller index of the surface, e.g. "1 1 1"')
+        "1 1 1", description='Miller index of the surface, e.g. "1 1 1"')
     min_slab_size: float = Field(
-        10.0, description="[make_slab] minimum slab thickness in Å")
+        10.0, description="minimum slab thickness in Å")
     min_vacuum_size: float = Field(
-        15.0, description="[make_slab] vacuum gap in Å (slab already includes vacuum)")
+        15.0, description="vacuum gap in Å (the slab already includes this vacuum)")
+    center: bool = Field(
+        True, description="recenter the slab within the cell")
     lll_reduce: bool = Field(
-        True, description="[make_slab] LLL-reduce the slab cell")
+        True, description="LLL-reduce the slab cell")
     shift: float = Field(
-        0.0, description="[make_slab] termination shift (selects which surface cut)")
+        0.0, description="termination shift (selects which surface cut)")
+
+
+class ConvertStructureInput(_StructureSourceInput):
     to_format: str = Field(
-        "cif", description='[convert] output format: "poscar" | "cif" | "xyz" | "cssr" | "json"')
+        "cif", description='output format: "poscar" | "cif" | "xyz" | "cssr" | "json"')
 
 
 # ── 14.10 analyze_symmetry (Step 5.5) ─────────────────────────────────────────

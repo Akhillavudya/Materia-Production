@@ -38,6 +38,7 @@ generated/
 /backend/CONTCAR*
 /backend/INCAR*
 /backend/KPOINTS*
+/backend/*.cif
 
 # ── Large datasets & model weights (provisioned out-of-band) ─────────────────
 /data/

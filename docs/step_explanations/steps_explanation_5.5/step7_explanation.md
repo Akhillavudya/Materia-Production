@@ -1,6 +1,9 @@
 # Step 5.5 · Step 7 — `convert` operation (format conversion)
 
 **Status:** ✅ Done
+**Superseded 2026-06-22 (Step 12):** the `convert` operation is now a standalone `convert_structure`
+tool (same behaviour — writes a format file, does not touch the active POSCAR). See
+`step12_explanation.md`.
 
 ## Goal
 Add the fourth `build_structure` operation: **`convert`** — write the current structure in a different

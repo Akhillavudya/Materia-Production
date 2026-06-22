@@ -4,7 +4,7 @@
  * Lists optimize / MD jobs for the current session and polls /api/jobs so
  * queued → running → succeeded/failed transitions and per-step progress appear
  * without a page refresh. Polls fast (2.5s) while any job is active, slow (12s)
- * otherwise. Distinct from JobDashboard, which shows synchronous tool history.
+ * otherwise. Jobs are launched from chat or the ToolLaunchPanel below it.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'

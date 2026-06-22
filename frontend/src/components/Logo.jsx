@@ -77,9 +77,10 @@
 const TEAL = '#00B4A6'
 const RING = '#FFFFFF'
 
-export function LogoMark({ size = 32, tile = false, radius = 8, glow = false }) {
+export function LogoMark({ size = 32, tile = false, radius = 8, glow = false, animate = false }) {
   // tile = false  → filled teal atom on transparent (the main lockup look)
   // tile = true   → white atom inside a teal→sky gradient app-icon square
+  // animate = true → atom orbits + breathes (e.g. while the assistant is thinking)
 
   const fg = tile ? RING : TEAL          // artwork color
   const inner = tile ? 'transparent' : RING // the orbital "hole"
@@ -92,6 +93,9 @@ export function LogoMark({ size = 32, tile = false, radius = 8, glow = false }) 
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       aria-hidden="true"
+      style={animate
+        ? { animation: 'materiaThink 1.8s ease-in-out infinite', transformOrigin: 'center' }
+        : undefined}
     >
       {/* four radiating bonds (drawn first, sit under the atom) */}
       <g stroke={fg} strokeWidth="1.6" strokeLinecap="round">

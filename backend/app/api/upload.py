@@ -176,6 +176,189 @@ async def _store_endpoint(session_id: str, slot: str, upload: UploadFile):
     return safe
 
 
+async def _store_optional(session_id: str, upload: UploadFile | None) -> str | None:
+    """Store an optional single-structure upload for a direct tool launch.
+
+    Returns the stored safe name when a file is supplied (so the tool runs on
+    exactly that structure), or ``None`` when no file is given — in which case
+    the tool auto-detects the session's active structure (poscar_name=None).
+    """
+    if upload is None or not (upload.filename or "").strip():
+        return None
+    safe = sanitize_filename(upload.filename or "structure")
+    if not is_upload_allowed(safe):
+        raise HTTPException(status_code=400,
+                            detail=f"structure: file type not allowed ({safe})")
+    content = await upload.read()
+    await upload.close()
+    if _too_large(content):
+        raise HTTPException(status_code=400,
+                            detail=f"structure exceeds {settings.max_upload_mb} MB limit")
+    dest = get_upload_dir(session_id) / safe
+    dest.write_bytes(content)
+    return safe
+
+
+async def _run_tool_launch(session_id: str, user_id: int, call):
+    """Run a synchronous ``material_tools`` launch in a worker thread.
+
+    Mirrors ``launch_neb``: ContextVars don't propagate async→thread, so set the
+    session dir + request identity inside the thread before invoking the tool.
+    Raises HTTP 400 if the tool returns an error envelope.
+    """
+    def _run():
+        set_session_dir(str(get_session_dir(session_id)))
+        set_request_identity(user_id, session_id)
+        return call()
+
+    result = await asyncio.get_running_loop().run_in_executor(None, _run)
+    if isinstance(result, dict) and result.get("status") == "error":
+        raise HTTPException(status_code=400, detail=result.get("message", "Launch failed"))
+    return result
+
+
+@router.post("/sessions/{session_id}/optimize")
+@limiter.limit("10/minute")
+async def launch_optimize(
+    request: Request,
+    session_id: str,
+    structure: UploadFile = File(None),
+    fmax: float = Form(0.02),
+    cell_relax: str = Form("none"),
+    optimizer: str = Form("FIRE"),
+    max_steps: int = Form(1000),
+    calculator_type: str = Form("mace"),
+    calculator_model: str | None = Form(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Launch a geometry-optimization job from the UI tool panel."""
+    await get_session_for_user(session_id, current_user, db)
+    name = await _store_optional(session_id, structure)
+    from app.tools import material_tools
+    return await _run_tool_launch(session_id, current_user.id, lambda: material_tools.optimize_structure(
+        poscar_name=name,
+        fmax=float(fmax),
+        cell_relax=cell_relax,
+        optimizer=optimizer,
+        max_steps=int(max_steps),
+        calculator_type=calculator_type,
+        calculator_model=calculator_model or None,
+    ))
+
+
+@router.post("/sessions/{session_id}/md")
+@limiter.limit("10/minute")
+async def launch_md(
+    request: Request,
+    session_id: str,
+    structure: UploadFile = File(None),
+    ensemble: str = Form("nvt"),
+    temperature: float = Form(300.0),
+    nsw: int = Form(2000),
+    timestep: float = Form(1.0),
+    pressure: float = Form(0.0),
+    calculator_type: str = Form("mace"),
+    calculator_model: str | None = Form(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Launch a molecular-dynamics (NVT/NPT) job from the UI tool panel."""
+    await get_session_for_user(session_id, current_user, db)
+    name = await _store_optional(session_id, structure)
+    from app.tools import material_tools
+    return await _run_tool_launch(session_id, current_user.id, lambda: material_tools.run_md_simulation(
+        poscar_name=name,
+        ensemble=ensemble,
+        temperature=float(temperature),
+        nsw=int(nsw),
+        timestep=float(timestep),
+        pressure=float(pressure),
+        calculator_type=calculator_type,
+        calculator_model=calculator_model or None,
+    ))
+
+
+@router.post("/sessions/{session_id}/phonons")
+@limiter.limit("10/minute")
+async def launch_phonons(
+    request: Request,
+    session_id: str,
+    structure: UploadFile = File(None),
+    supercell: str = Form("3 3 3"),
+    disp_distance: float = Form(0.01),
+    mesh: int = Form(20),
+    calculator_type: str = Form("mace"),
+    calculator_model: str | None = Form(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Launch a phonon (phonopy) job from the UI tool panel."""
+    await get_session_for_user(session_id, current_user, db)
+    name = await _store_optional(session_id, structure)
+    from app.tools import material_tools
+    return await _run_tool_launch(session_id, current_user.id, lambda: material_tools.compute_phonons(
+        poscar_name=name,
+        supercell=supercell,
+        disp_distance=float(disp_distance),
+        mesh=int(mesh),
+        calculator_type=calculator_type,
+        calculator_model=calculator_model or None,
+    ))
+
+
+@router.post("/sessions/{session_id}/elastic")
+@limiter.limit("10/minute")
+async def launch_elastic(
+    request: Request,
+    session_id: str,
+    structure: UploadFile = File(None),
+    fmax: float = Form(0.01),
+    max_steps: int = Form(300),
+    calculator_type: str = Form("mace"),
+    calculator_model: str | None = Form(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Launch an elastic / mechanical-properties job from the UI tool panel."""
+    await get_session_for_user(session_id, current_user, db)
+    name = await _store_optional(session_id, structure)
+    from app.tools import material_tools
+    return await _run_tool_launch(session_id, current_user.id, lambda: material_tools.compute_elastic_tensor(
+        poscar_name=name,
+        fmax=float(fmax),
+        max_steps=int(max_steps),
+        calculator_type=calculator_type,
+        calculator_model=calculator_model or None,
+    ))
+
+
+@router.post("/sessions/{session_id}/sqs")
+@limiter.limit("10/minute")
+async def launch_sqs(
+    request: Request,
+    session_id: str,
+    structure: UploadFile = File(None),
+    supercell: str = Form("2 2 2"),
+    target_comp: str | None = Form(None),
+    n_parallel: int = Form(4),
+    time_budget_s: int = Form(600),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Launch an SQS (special quasi-random structure) job from the UI tool panel."""
+    await get_session_for_user(session_id, current_user, db)
+    name = await _store_optional(session_id, structure)
+    from app.tools import material_tools
+    return await _run_tool_launch(session_id, current_user.id, lambda: material_tools.generate_sqs(
+        cif_name=name,
+        target_comp=(target_comp or None),
+        supercell=supercell,
+        n_parallel=int(n_parallel),
+        time_budget_s=int(time_budget_s),
+    ))
+
+
 @router.post("/sessions/{session_id}/neb")
 @limiter.limit("10/minute")
 async def launch_neb(

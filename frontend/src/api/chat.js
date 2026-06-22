@@ -5,11 +5,16 @@
  *   data: {"type":"token","value":"..."}  — text token
  *   data: {"type":"status","value":"..."}  — spinner label
  *   data: [FILES:{...json...}]             — tool result card
+ *   data: [PLAN:{...json...}]              — proposed multi-tool plan (confirm gate)
  *   data: [TOOL_START:<name>]
  *   data: [TOOL_END:<name>:<status>]
  *   data: [NEED_API_KEY:<service>]
  *   data: [SESSION:<id>]
  *   data: [DONE]
+ *
+ * To EXECUTE a confirmed plan, pass options.plan — the backend then runs the
+ * approved workflow instead of proposing a new plan. options.onPlan(plan) fires
+ * when the backend proposes a plan to confirm.
  */
 
 import { authRequest, readError } from './client'
@@ -34,7 +39,11 @@ export async function streamChat(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: options.signal,
-      body: JSON.stringify({ session_id: sessionId || null, message }),
+      body: JSON.stringify({
+        session_id: sessionId || null,
+        message,
+        ...(options.plan ? { plan: options.plan } : {}),
+      }),
     })
 
     if (!response.ok) {
@@ -76,6 +85,16 @@ export async function streamChat(
           : payload.length)
         try { onFiles(JSON.parse(jsonStr)) } catch (e) {
           console.warn('[streamChat] Failed to parse FILES payload', e, jsonStr)
+        }
+        return
+      }
+
+      if (payload.startsWith('[PLAN:')) {
+        const jsonStr = payload.slice(6, payload.lastIndexOf(']') === payload.length - 1
+          ? payload.length - 1
+          : payload.length)
+        try { options.onPlan?.(JSON.parse(jsonStr)) } catch (e) {
+          console.warn('[streamChat] Failed to parse PLAN payload', e, jsonStr)
         }
         return
       }

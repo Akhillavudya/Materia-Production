@@ -1,6 +1,10 @@
 # Step 5.5 — Plan: More VASP calculations + structure-building tools
 
 **Status:** ✅ Complete (2026-06-18) — all 11 steps shipped; ARM image built at Oracle deploy.
+**Amended 2026-06-22 (Step 12):** the combined `build_structure` tool was split into four dedicated
+tools (`make_supercell`, `add_vacuum`, `make_slab`, `convert_structure`) and two correctness bugs
+(vacuum amount/side, supercell matrix support) were fixed. See `step12_explanation.md`. Sections
+below describe the *original* design; the tool count is now 16 model-facing tools.
 **Goal:** Give PhD users many more kinds of VASP input files from the *one* `generate_vasp_inputs`
 tool, and add tools that **build/modify the crystal structure itself** (supercell, vacuum, slab,
 format conversion, symmetry, point defects) — so they can prepare real research calculations
@@ -31,6 +35,7 @@ for a structure you already had. Two things were missing:
 2. **Structure work = 5 new tools:**
    - `build_structure` — one combined tool, four transform operations (`make_supercell`, `add_vacuum`,
      `make_slab`, `convert`) chosen by an `operation` arg.
+     **(Superseded 2026-06-22 — Step 12: now four separate tools, no `operation` arg.)**
    - `analyze_symmetry` — separate, *read-only* (space group / point group).
    - `create_vacancy` / `create_substitution` / `create_interstitial` — three point-defect tools.
 3. **Defect tools come last** — only they need a new dependency (`pymatgen-analysis-defects`).
@@ -55,6 +60,7 @@ for a structure you already had. Two things were missing:
 | 9 | Defect tools + `pymatgen-analysis-defects` (LAST) | `step9_explanation.md` ✅ |
 | 10 | Frontend surfacing (tool labels; no form — chat-driven) | `step10_explanation.md` ✅ |
 | 11 | ONE Docker image rebuild + smoke test | `step11_explanation.md` ✅ |
+| 12 | Split `build_structure` → 4 tools; fix vacuum amount/side + supercell matrix | `step12_explanation.md` ✅ (local) |
 
 ---
 
@@ -78,6 +84,10 @@ for a structure you already had. Two things were missing:
       charge via generate_vasp_inputs); pymatgen-analysis-defects uncommented; 13 tools total.
 - [x] **Step 11** — backend + frontend images rebuilt; in-image smoke test: new dep imports, HSE06
       modifier works, real POTCAR (196 KB) assembled from the runtime-mounted PAW library.
+- [x] **Step 12** (2026-06-22, local) — `build_structure` split into `make_supercell`/`add_vacuum`/
+      `make_slab`/`convert_structure`; `add_vacuum` now produces the *exact* requested gap with a
+      `side` (both/top/bottom) instead of `center`; `make_supercell` accepts uniform / per-axis /
+      3×3-matrix scaling with a unified atom-cap predictor. 16 model-facing tools. Docker rebuild pending.
 
 ---
 

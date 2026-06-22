@@ -10,6 +10,7 @@ Streaming SSE contract (unchanged — consumed by `api/chat.py` and the frontend
     data: {"type":"status","value":...}   data: {"type":"token","value":...}
     data: [TOOL_START:<tool>]             data: [TOOL_END:<tool>:<status>]
     data: [FILES:{...}]                   data: [JOB:{...}]
+    data: [PLAN:{...}]                    (multi-tool confirmation gate; planner.py)
     data: [DONE]                          data: [SESSION:<id>]
 """
 
@@ -51,7 +52,10 @@ Your tools:
 - search_materials — find materials by formula / element / properties.
 - generate_vasp_inputs — build the FULL VASP input set (POSCAR + INCAR + KPOINTS) (fast).
 - generate_poscar — build ONLY a POSCAR, nothing else (fast).
-- build_structure — build a bulk/supercell/surface structure (fast).
+- make_supercell — replicate a cell into a supercell (fast).
+- add_vacuum — add vacuum padding along an axis, e.g. for 2D layers (fast).
+- make_slab — cut a surface slab along a Miller index; vacuum included (fast).
+- convert_structure — write a structure in another format (poscar/cif/xyz/cssr/json) (fast).
 - analyze_symmetry — report space group / symmetry of a session structure (fast).
 - create_vacancy / create_substitution / create_interstitial — make point-defect \
 structures from a session structure (fast).
@@ -220,6 +224,62 @@ def _call_signature(tc: ToolCall) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Confirmed-plan execution helpers — show the user the FINAL deliverable only.
+# A structure file from an early step (e.g. an intermediate supercell POSCAR) is
+# hidden once a LATER step produced its own structure; everything non-structure
+# (INCAR/KPOINTS/POTCAR, CSVs, plots) is always kept. Net effect: the final
+# structure + all VASP files, with intermediate structures suppressed.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_STRUCTURE_NAMES = {"POSCAR", "CONTCAR"}
+_STRUCTURE_EXTS = {"cif", "vasp", "xyz", "cssr"}
+
+
+def _is_structure_file(f: dict) -> bool:
+    name = str(f.get("name", "")).upper()
+    if name in _STRUCTURE_NAMES:
+        return True
+    ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    return ext in _STRUCTURE_EXTS
+
+
+def compute_final_files(step_results: list[dict]) -> list[dict]:
+    """Final deliverable files: drop structure files superseded by a later step."""
+    last_struct_step = -1
+    for i, s in enumerate(step_results):
+        if any(_is_structure_file(f) for f in s.get("files", []) or []):
+            last_struct_step = i
+
+    final: list[dict] = []
+    seen: set[str] = set()
+    for i, s in enumerate(step_results):
+        for f in s.get("files", []) or []:
+            rel = f.get("rel_path")
+            if rel in seen:
+                continue
+            if _is_structure_file(f) and i != last_struct_step:
+                continue  # intermediate structure — hidden
+            seen.add(rel)
+            final.append(f)
+    return final
+
+
+def _plan_guidance(plan: dict) -> str:
+    """Render the user-approved plan as a system instruction for execution."""
+    lines = ["The user reviewed and APPROVED the following plan. Execute it now, "
+             "calling the tools in order. Do not ask for confirmation again."]
+    if plan.get("summary"):
+        lines.append(f"Goal: {plan['summary']}")
+    for i, step in enumerate(plan.get("steps", []), 1):
+        title = step.get("title") or step.get("tool")
+        lines.append(f"{i}. {step.get('tool')} — {title}")
+    if plan.get("final_output"):
+        lines.append(f"Deliverable: {plan['final_output']}")
+    lines.append("After the tools finish, write a short summary of what was produced.")
+    return "\n".join(lines)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Tool execution — runs one tool call, emits the SSE side-channel events, and
 # returns the raw result dict (for the [FILES:] payload + LLM feedback).
 # ─────────────────────────────────────────────────────────────────────────────
@@ -231,6 +291,7 @@ async def _execute_tool(
     session_dir: str,
     user_id: int | None,
     step_results: list[dict],
+    emit_files: bool = True,
 ) -> dict:
     tool_name = tc.name
     tool_args = dict(tc.args or {})
@@ -286,7 +347,11 @@ async def _execute_tool(
                     files_payload[key] = result[key]
 
         await queue.put(f"data: [TOOL_END:{tool_name}:{status}]\n\n")
-        await queue.put(f"data: [FILES:{json.dumps(files_payload)}]\n\n")
+        # When executing a confirmed plan we DEFER per-step file cards and flush
+        # only the final deliverable at the end (so intermediate structures are
+        # hidden). The payload is still recorded in step_results either way.
+        if emit_files:
+            await queue.put(f"data: [FILES:{json.dumps(files_payload)}]\n\n")
 
         if isinstance(result, dict) and result.get("job_id"):
             job_event = {
@@ -316,12 +381,18 @@ async def _agent_loop(
     user_id: int | None,
     session_dir: str,
     queue: asyncio.Queue,
+    plan: dict | None = None,
 ) -> None:
     provider = get_provider()
 
     conv: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}] + [
         {"role": m["role"], "content": m.get("content", "")} for m in messages
     ]
+    # Confirmed-plan execution: inject the approved plan as a final instruction
+    # and DEFER per-step file cards so only the final deliverable is shown.
+    defer_files = bool(plan and plan.get("steps"))
+    if defer_files:
+        conv.append({"role": "user", "content": _plan_guidance(plan)})
     step_results: list[dict] = []
     produced_text = False
     executed_calls: set[str] = set()   # (tool+args) fingerprints already run (BS2)
@@ -395,7 +466,8 @@ async def _agent_loop(
             executed_calls.add(sig)
 
             raw = await _execute_tool(
-                tc, queue, session_id, session_dir, user_id, step_results)
+                tc, queue, session_id, session_dir, user_id, step_results,
+                emit_files=not defer_files)
             if isinstance(raw, dict) and raw.get("job_id"):
                 started_job_msg = (
                     f"✓ Your {raw.get('type') or tc.name} job was queued "
@@ -414,6 +486,19 @@ async def _agent_loop(
         await queue.put(
             f"data: {json.dumps({'type': 'token', 'value': 'Reached the tool-call limit for this request. Let me know how you would like to proceed.'})}\n\n"
         )
+
+    # Confirmed-plan flush: emit the single final-deliverable card now that all
+    # steps have run (per-step cards were deferred above).
+    if defer_files:
+        final_files = compute_final_files(step_results)
+        if final_files:
+            final_payload = {
+                "tool": "final_output",
+                "label": "Final structure & inputs",
+                "status": "success",
+                "files": final_files,
+            }
+            await queue.put(f"data: [FILES:{json.dumps(final_payload)}]\n\n")
 
     await queue.put(f"data: {json.dumps({'type': 'status', 'value': ''})}\n\n")
     await queue.put("data: [DONE]\n\n")
@@ -444,13 +529,14 @@ async def run_agent(
     messages: list[dict],
     session_id: str,
     user_id: int | None = None,
+    plan: dict | None = None,
 ) -> AsyncGenerator[str, None]:
     session_dir = str(get_session_dir(session_id))
     queue: asyncio.Queue[str | None] = asyncio.Queue()
 
     async def _run():
         try:
-            await _agent_loop(messages, session_id, user_id, session_dir, queue)
+            await _agent_loop(messages, session_id, user_id, session_dir, queue, plan)
         except Exception as e:  # noqa: BLE001
             import traceback
             traceback.print_exc()

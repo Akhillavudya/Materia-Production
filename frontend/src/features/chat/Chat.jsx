@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { streamChat } from '../../api'
 import FileCard    from '../files/FileCard'
+import PlanCard    from './PlanCard'
 import ToolStatus  from './ToolStatus'
 import ApiKeyForm  from './ApiKeyForm'
 import UploadButton from './UploadButton'
@@ -75,6 +76,9 @@ function blankAssistant() {
     activeToolStatus: 'running',
     statusText:  '',         // transient "🧠 Planning…" label, cleared on DONE
     needsApiKey: null,
+    // multi-tool confirmation gate (set by onPlan); null for normal turns
+    plan:        null,       // { summary, steps:[{tool,title,detail,status}], final_output }
+    planState:   null,       // 'proposed' | 'running' | 'done' | 'canceled'
   }
 }
 
@@ -152,6 +156,37 @@ export default function Chat({
       copy[copy.length - 1] = patchFn(last)
       return copy
     })
+  }
+
+  // patch a message by index — used by plan execution, which must target the
+  // plan's own message even if it is no longer the last one.
+  function patchAt(index, patchFn) {
+    setMessages(prev => {
+      if (index < 0 || index >= prev.length) return prev
+      const copy = [...prev]
+      copy[index] = patchFn(copy[index])
+      return copy
+    })
+  }
+
+  // mark the first matching plan step running / done / error during execution
+  function markStep(msg, toolName, newStatus) {
+    if (!msg.plan) return msg
+    let applied = false
+    const steps = msg.plan.steps.map(s => {
+      if (applied) return s
+      const pending = !s.status || s.status === 'pending'
+      if (newStatus === 'running' && s.tool === toolName && pending) {
+        applied = true
+        return { ...s, status: 'running' }
+      }
+      if (newStatus !== 'running' && s.tool === toolName && s.status === 'running') {
+        applied = true
+        return { ...s, status: newStatus }
+      }
+      return s
+    })
+    return { ...msg, plan: { ...msg.plan, steps } }
   }
 
   async function sendMessage(overrideText) {
@@ -284,6 +319,15 @@ export default function Chat({
       },
       {
         signal: controller.signal,
+        // onPlan — backend proposed a multi-tool plan; show the confirm gate
+        onPlan: (plan) => {
+          if (!mountedRef.current) return
+          patchLast(last => ({
+            ...last,
+            plan: { ...plan, steps: (plan.steps || []).map(s => ({ ...s, status: 'pending' })) },
+            planState: 'proposed',
+          }))
+        },
         onAbort: () => {
           if (!mountedRef.current) return
           patchLast(last => ({
@@ -302,6 +346,80 @@ export default function Chat({
         },
       }
     )
+  }
+
+  // ── confirm a proposed plan → execute it (phase 2) ────────────────────────
+  async function confirmPlan(index, plan) {
+    if (streaming) return
+    const controller = new AbortController()
+    abortControllerRef.current = controller
+    setError(null)
+
+    patchAt(index, msg => ({
+      ...msg,
+      planState: 'running',
+      content: '',
+      toolCards: [],
+      plan: { ...msg.plan, steps: msg.plan.steps.map(s => ({ ...s, status: 'pending' })) },
+    }))
+    setStreaming(true)
+
+    await streamChat(
+      sessionId,
+      '',                                   // execute phase carries no new message
+      (token)  => patchAt(index, m => ({ ...m, content: m.content + token })),
+      (id)     => onSessionCreated(id),
+      (fileData) => {                       // final consolidated deliverable card
+        if (!mountedRef.current) return
+        patchAt(index, m => ({
+          ...m,
+          toolCards: [...m.toolCards, {
+            toolName: fileData.tool, label: fileData.label,
+            status: fileData.status || 'success', files: fileData.files || [],
+          }],
+        }))
+        onFilesGenerated?.()
+      },
+      (toolName) => patchAt(index, m => markStep(m, toolName, 'running')),
+      (toolName, status) => patchAt(index, m => markStep(
+        m, toolName,
+        (status === 'success' || status === 'ok' || status === 'skipped') ? 'done' : 'error',
+      )),
+      (statusText) => patchAt(index, m => ({ ...m, statusText: statusText || '' })),
+      (service) => { setPendingMessage(''); patchAt(index, m => ({ ...m, needsApiKey: service })) },
+      () => onJobDone?.(),
+      () => {                               // onDone
+        if (!mountedRef.current) return
+        abortControllerRef.current = null
+        patchAt(index, m => ({ ...m, statusText: '', planState: 'done' }))
+        setStreaming(false)
+      },
+      (err) => {                            // onError — let the user retry
+        if (!mountedRef.current) return
+        abortControllerRef.current = null
+        setError(err)
+        patchAt(index, m => ({ ...m, planState: 'proposed' }))
+        setStreaming(false)
+      },
+      {
+        signal: controller.signal,
+        plan,
+        onAbort: () => {
+          if (!mountedRef.current) return
+          patchAt(index, m => ({ ...m, statusText: '', planState: 'proposed' }))
+          abortControllerRef.current = null
+          setStreaming(false)
+        },
+      },
+    )
+  }
+
+  function cancelPlan(index) {
+    patchAt(index, m => ({
+      ...m,
+      planState: 'canceled',
+      content: m.content || "_Plan canceled — tell me what you'd like to change._",
+    }))
   }
 
   useEffect(() => {
@@ -542,33 +660,21 @@ export default function Chat({
                 {msg.role === 'assistant' && (
                   <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start', width: '100%' }}>
 
-                    {/* avatar */}
+                    {/* avatar — atom animates while the assistant is thinking */}
                     <span style={{ marginTop: '2px', display: 'inline-flex', flexShrink: 0 }}>
-                      <LogoMark size={28} radius={8} />
+                      <LogoMark size={28} radius={8} animate={isLive} />
                     </span>
 
                     <div style={{ flex: 1, minWidth: 0 }}>
 
-                      {/* ── transient status label (planning / fetching…) ── */}
-                      {isLive && msg.statusText && (
-                        <div style={{
-                          fontSize: '13px',
-                          color: 'var(--text-muted)',
-                          marginBottom: '8px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                        }}>
-                          <span style={{
-                            display: 'inline-block',
-                            width: '10px', height: '10px',
-                            borderRadius: '50%',
-                            border: '2px solid var(--text-muted)',
-                            borderTopColor: 'transparent',
-                            animation: 'spin 0.8s linear infinite',
-                          }} />
-                          {msg.statusText}
-                        </div>
+                      {/* ── multi-tool plan confirmation gate ── */}
+                      {msg.plan && (
+                        <PlanCard
+                          plan={msg.plan}
+                          planState={msg.planState}
+                          onConfirm={() => confirmPlan(i, msg.plan)}
+                          onCancel={() => cancelPlan(i)}
+                        />
                       )}
 
                       {/* ── assistant text (markdown) ── */}

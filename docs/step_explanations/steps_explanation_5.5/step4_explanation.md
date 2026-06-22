@@ -1,6 +1,9 @@
 # Step 5.5 · Step 4 — `build_structure` tool + `make_supercell`
 
 **Status:** ✅ Done
+**Superseded 2026-06-22 (Step 12):** `build_structure` was split into four standalone tools;
+`make_supercell` is now its own tool and also accepts a 3×3 transformation matrix. See
+`step12_explanation.md`. This doc describes the original combined-tool design.
 
 ## Goal
 Introduce the first structure-building tool, `build_structure`, with its first operation

@@ -1,8 +1,7 @@
 import { useState } from 'react'
-import FilePanel      from '../files/FilePanel'
-import JobDashboard   from './JobDashboard'
-import AsyncJobsPanel from './AsyncJobsPanel'
-import NebPanel       from './NebPanel'
+import FilePanel       from '../files/FilePanel'
+import AsyncJobsPanel  from './AsyncJobsPanel'
+import ToolLaunchPanel from './ToolLaunchPanel'
 
 
 export default function RightPanel({
@@ -14,8 +13,10 @@ export default function RightPanel({
 }) {
   // which tab is active — 'files' or 'jobs'
   const [activeTab, setActiveTab] = useState('files')
-  // bumped when the NEB panel launches a job, to refresh the jobs list at once
+  // bumped when a tool panel launches a job, to refresh the jobs list at once
   const [nebRefresh, setNebRefresh] = useState(0)
+  // bumped when the tool panel uploads a structure, to refresh the Files tab
+  const [fileRefresh, setFileRefresh] = useState(0)
 
   return (
     <div style={{
@@ -70,21 +71,17 @@ export default function RightPanel({
         {activeTab === 'files' ? (
           <FilePanel
             sessionId={sessionId}
-            refreshTrigger={filePanelRefresh}
+            refreshTrigger={filePanelRefresh + fileRefresh}
             onOpenFile={onOpenFile}
           />
         ) : (
           <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
             <AsyncJobsPanel sessionId={sessionId} refreshSignal={nebRefresh} />
-            <JobDashboard
-              sessionId={sessionId}
-              refreshTrigger={jobRefresh}
-              onRerun={onRerun}
-            />
             <div style={{ flex: 1 }} />
-            <NebPanel
+            <ToolLaunchPanel
               sessionId={sessionId}
               onLaunched={() => setNebRefresh((n) => n + 1)}
+              onUploaded={() => setFileRefresh((n) => n + 1)}
             />
           </div>
         )}

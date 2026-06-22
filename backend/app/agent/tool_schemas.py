@@ -14,8 +14,9 @@ from pydantic import BaseModel
 
 from app.agent.providers.base import ToolSpec
 from app.tools.contracts import (
+    AddVacuumInput,
     AnalyzeSymmetryInput,
-    BuildStructureInput,
+    ConvertStructureInput,
     CreateInterstitialInput,
     CreateSubstitutionInput,
     CreateVacancyInput,
@@ -23,6 +24,8 @@ from app.tools.contracts import (
     GenerateVaspInputsInput,
     ListFilesInput,
     ListModelsInput,
+    MakeSlabInput,
+    MakeSupercellInput,
     OptimizeStructureInput,
     ReadFileInput,
     RunMdSimulationInput,
@@ -54,16 +57,33 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
         "from a prior search, or a poscar_path to convert an existing session "
         "structure. Use generate_vasp_inputs instead for the full input set."
     ),
-    "build_structure": (
-        "Build or modify a crystal structure and save the result as the active "
-        "POSCAR (so it chains into optimize/MD/VASP). Pick an `operation`: "
-        "make_supercell (replicate the cell, e.g. scaling='2 2 1' or '2'); add_vacuum "
-        "(add `thickness` Å of vacuum along `axis` a/b/c — for 2D layers, molecules, "
-        "or padding a slab); make_slab (cut a surface along `miller` e.g. '1 1 1' with "
-        "`min_slab_size`/`min_vacuum_size` Å — vacuum is INCLUDED, so do not also call "
-        "add_vacuum); convert (write the structure in another format via `to_format`: "
-        "poscar/cif/xyz/cssr/json). Operates on the active session structure by "
-        "default, or pass poscar_path / material_id."
+    "make_supercell": (
+        "Replicate a crystal cell into a supercell and save it as the active POSCAR "
+        "(so it chains into optimize/MD/VASP). `scaling` accepts a uniform factor "
+        "('2' → 2x2x2), per-axis factors ('2 2 1'), or 9 numbers for a full 3x3 "
+        "transformation matrix ('2 0 0 0 2 0 0 0 1', for rotated/non-diagonal cells "
+        "like a sqrt3 x sqrt3). Operates on the active session structure by default, "
+        "or pass poscar_path / material_id."
+    ),
+    "add_vacuum": (
+        "Set the vacuum gap along `axis` (a/b/c) to EXACTLY `thickness` Å and save "
+        "the result as the active POSCAR — for 2D layers, molecules, or padding a "
+        "structure. `side` controls placement: 'both' (centred, default), 'top' (all "
+        "vacuum above the slab), or 'bottom'. The gap matches `thickness` regardless "
+        "of existing padding. Do NOT use on a make_slab result (slabs already include "
+        "vacuum). Operates on the active session structure by default, or pass "
+        "poscar_path / material_id."
+    ),
+    "make_slab": (
+        "Cut a surface slab along `miller` (e.g. '1 1 1') with `min_slab_size` and "
+        "`min_vacuum_size` Å, saved as the active POSCAR. Vacuum is INCLUDED, so do "
+        "not also call add_vacuum. `shift` selects the surface termination. Operates "
+        "on the active session structure by default, or pass poscar_path / material_id."
+    ),
+    "convert_structure": (
+        "Write a structure in another file format (`to_format`: poscar/cif/xyz/cssr/"
+        "json). Does NOT change the active POSCAR. Operates on the active session "
+        "structure by default, or pass poscar_path / material_id."
     ),
     "analyze_symmetry": (
         "Report a structure's symmetry: space group (symbol + number), point group, "
@@ -122,7 +142,10 @@ _TOOL_MODELS: list[tuple[str, type[BaseModel]]] = [
     ("search_materials", SearchMaterialsInput),
     ("generate_vasp_inputs", GenerateVaspInputsInput),
     ("generate_poscar", GeneratePoscarInput),
-    ("build_structure", BuildStructureInput),
+    ("make_supercell", MakeSupercellInput),
+    ("add_vacuum", AddVacuumInput),
+    ("make_slab", MakeSlabInput),
+    ("convert_structure", ConvertStructureInput),
     ("analyze_symmetry", AnalyzeSymmetryInput),
     ("create_vacancy", CreateVacancyInput),
     ("create_substitution", CreateSubstitutionInput),

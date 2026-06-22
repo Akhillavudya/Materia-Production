@@ -73,6 +73,12 @@ body {
   50%       { opacity: 0; }
 }
 
+/* ── logo "thinking" animation — atom gently zooms in and out ── */
+@keyframes materiaThink {
+  0%, 100% { transform: scale(1);    }
+  50%      { transform: scale(1.18); }
+}
+
 /* ── utility ── */
 .fade-in {
   animation: fadeInUp 0.2s ease forwards;
@@ -81,10 +87,14 @@ body {
 /* ── assistant markdown rendering ── */
 .assistant-markdown {
   width: 100%;
-  max-width: 68ch;
-  color: var(--text-primary);
-  font-size: 15px;
-  line-height: 1.65;
+  max-width: 72ch;
+  color: #1f2328;
+  font-size: 15.5px;
+  line-height: 1.72;
+  letter-spacing: -0.003em;
+  font-feature-settings: "kern", "liga", "calt", "tnum";
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
   overflow-wrap: anywhere;
   word-break: normal;
 }
@@ -98,18 +108,18 @@ body {
 }
 
 .assistant-markdown p {
-  margin: 0 0 0.95rem;
+  margin: 0 0 1.05rem;
 }
 
 .assistant-markdown h1,
 .assistant-markdown h2,
 .assistant-markdown h3,
 .assistant-markdown h4 {
-  color: #111827;
-  font-weight: 700;
+  color: #0d1117;
+  font-weight: 650;
   line-height: 1.3;
-  letter-spacing: -0.015em;
-  margin: 1.55rem 0 0.65rem;
+  letter-spacing: -0.018em;
+  margin: 1.7rem 0 0.7rem;
 }
 
 .assistant-markdown h1 { font-size: 1.65rem; }
@@ -213,22 +223,24 @@ body {
 }
 
 .assistant-markdown .katex {
-  font-size: 1.04em;
+  font-size: 1.12em;
+  color: #0d1117;
 }
 
 .assistant-markdown .katex-display {
-  margin: 1.1rem 0 1.2rem;
-  padding: 0.85rem 1rem;
+  margin: 1.25rem 0 1.35rem;
+  padding: 1rem 1.15rem;
   overflow-x: auto;
   overflow-y: hidden;
   border: 1px solid var(--border-light);
-  border-radius: var(--radius-sm);
-  background: #fbfbfa;
-  line-height: 1.4;
+  border-radius: var(--radius-md);
+  background: #fafaf9;
+  line-height: 1.5;
 }
 
 .assistant-markdown .katex-display > .katex {
   display: inline-block;
   min-width: max-content;
   text-align: left;
+  font-size: 1.18em;
 }

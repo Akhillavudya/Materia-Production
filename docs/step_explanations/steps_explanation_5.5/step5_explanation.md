@@ -1,6 +1,9 @@
 # Step 5.5 · Step 5 — `add_vacuum` operation
 
 **Status:** ✅ Done
+**Superseded 2026-06-22 (Step 12):** `add_vacuum` is now a standalone tool, produces the *exact*
+requested vacuum gap (not cell-length + thickness), and replaces `center` with `side`
+(both/top/bottom). See `step12_explanation.md`. This doc describes the original behaviour.
 
 ## Goal
 Add the second `build_structure` operation: **`add_vacuum`** — open up empty space along a chosen

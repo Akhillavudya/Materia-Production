@@ -155,65 +155,129 @@ def _parse_miller(miller):
 
 
 def _parse_scaling(scaling):
-    """Parse a supercell spec into an int or a [nx, ny, nz] list.
+    """Parse a supercell spec into a scaling argument for ``make_supercell``.
 
-    Accepts ``"2"`` / ``2`` (uniform) or ``"2 2 1"`` / ``"2,2,1"`` / a 3-list.
-    Raises ``ValueError`` on anything else or on factors < 1.
+    Accepts every common variety:
+      - uniform:    ``"2"`` / ``2``                      → int (a 2×2×2 cell)
+      - per-axis:   ``"2 2 1"`` / ``"2,2,1"`` / ``[2,2,1]`` → ``[nx, ny, nz]``
+      - 3×3 matrix: ``"2 0 0 0 2 0 0 0 1"`` / nested 3×3  → ``[[…],[…],[…]]``
+        (for non-diagonal / rotated supercells, e.g. a √3×√3 cell)
+
+    Raises ``ValueError`` on anything else, on diagonal factors < 1, or on a
+    singular / non-positive-determinant matrix.
     """
     if scaling is None:
         raise ValueError("scaling is required, e.g. '2 2 1' or '2'.")
+
+    # Flatten to a flat list of ints (supports nested lists and string forms).
     if isinstance(scaling, (list, tuple)):
-        vals = [int(v) for v in scaling]
+        vals: list[int] = []
+        for v in scaling:
+            if isinstance(v, (list, tuple)):
+                vals.extend(int(x) for x in v)
+            else:
+                vals.append(int(v))
     else:
         vals = [int(x) for x in str(scaling).replace(",", " ").split()]
 
     if not vals:
         raise ValueError("scaling is empty; use e.g. '2 2 1' or '2'.")
-    if any(v < 1 for v in vals):
-        raise ValueError("supercell scaling factors must be >= 1.")
     if len(vals) == 1:
+        if vals[0] < 1:
+            raise ValueError("supercell scaling factor must be >= 1.")
         return vals[0]
     if len(vals) == 3:
+        if any(v < 1 for v in vals):
+            raise ValueError("per-axis supercell factors must be >= 1.")
         return vals
-    raise ValueError("scaling must be one integer or three (e.g. '2' or '2 2 1').")
+    if len(vals) == 9:
+        matrix = [vals[0:3], vals[3:6], vals[6:9]]
+        det = round(float(np.linalg.det(np.array(matrix))))
+        if det <= 0:
+            raise ValueError(
+                "a 3×3 supercell matrix must have a positive determinant "
+                "(reorder the rows if it is negative).")
+        return matrix
+    raise ValueError(
+        "scaling must be 1 integer ('2'), 3 integers ('2 2 1'), or 9 numbers "
+        "for a 3×3 matrix ('2 0 0 0 2 0 0 0 1').")
+
+
+def supercell_multiplier(scaling) -> int:
+    """How many times the atom count grows for a given scaling spec.
+
+    Uniform → factor³, per-axis → nx·ny·nz, 3×3 matrix → |determinant|. Shared by
+    the pre-build atom-cap check so it matches what ``make_supercell`` will produce.
+    """
+    factor = _parse_scaling(scaling)
+    if isinstance(factor, int):
+        return factor ** 3
+    arr = np.array(factor)
+    if arr.ndim == 1:
+        return int(arr[0] * arr[1] * arr[2])
+    return int(round(abs(np.linalg.det(arr))))
 
 
 def make_supercell(structure, scaling):
-    """Return a supercell of `structure` replicated by `scaling` ('2 2 1' or '2')."""
+    """Return a supercell of `structure` for any `scaling` variety.
+
+    `scaling` may be uniform ('2'), per-axis ('2 2 1') or a full 3×3 matrix
+    ('2 0 0 0 2 0 0 0 1') — see ``_parse_scaling``.
+    """
     factor = _parse_scaling(scaling)
     s = structure.copy()
     s.make_supercell(factor)
     return s
 
 
-def add_vacuum(structure, axis="c", thickness=15.0, center=True):
-    """Extend the cell along `axis` by `thickness` Å of vacuum.
+_VACUUM_SIDES = ("both", "top", "bottom")
 
-    Lengthens the chosen lattice vector (keeping its direction) while holding atoms
-    at their Cartesian positions, so empty space opens up along that axis. When
-    `center` is true the atoms are recentred within the enlarged cell — the usual
-    choice for slabs and 2D layers.
+
+def add_vacuum(structure, axis="c", thickness=15.0, side="both"):
+    """Set the vacuum gap along `axis` to exactly `thickness` Å.
+
+    Measures how far the atoms actually extend along the axis and resizes the cell
+    so the gap to the next periodic image is exactly `thickness` Å — independent of
+    any padding the input already had. This makes the vacuum match what the caller
+    asked for rather than *adding* to whatever empty space happened to be there.
+
+    `side` places the slab within the resized cell:
+      - "both"   (default): centred, `thickness`/2 of vacuum on each side
+      - "top"    : slab flush to the bottom, all `thickness` Å of vacuum above
+      - "bottom" : slab flush to the top, all `thickness` Å of vacuum below
+
+    Intended for slabs, 2D layers and molecules — not bulk crystals, which fill
+    their cell and should not have a vacuum gap inserted.
     """
     from pymatgen.core import Lattice, Structure
 
     thickness = float(thickness)
     if thickness <= 0:
         raise ValueError("vacuum thickness must be > 0 Å.")
+    s = str(side or "both").lower().strip()
+    if s not in _VACUUM_SIDES:
+        raise ValueError('side must be one of "both", "top" or "bottom".')
     i = _axis_index(axis)
 
     matrix = structure.lattice.matrix.copy()
-    length = float(np.linalg.norm(matrix[i]))
-    matrix[i] = matrix[i] / length * (length + thickness)
+    axis_vec = matrix[i]
+    unit = axis_vec / float(np.linalg.norm(axis_vec))
+
+    # Project atoms onto the axis direction; the material spans [proj_min, proj_max].
+    proj = structure.cart_coords @ unit
+    proj_min = float(proj.min())
+    span = float(proj.max() - proj.min())
+
+    # Resize the axis so the inter-image gap equals `thickness` exactly.
+    matrix[i] = unit * (span + thickness)
     new_lat = Lattice(matrix)
 
-    new = Structure(new_lat, structure.species, structure.cart_coords,
-                    coords_are_cartesian=True)
-    if center:
-        frac = new.frac_coords
-        col = frac[:, i]
-        frac[:, i] = col + (0.5 - (col.min() + col.max()) / 2.0)
-        new = Structure(new_lat, new.species, frac)
-    return new
+    # Where the bottom-most atom should sit along the axis after the resize.
+    target_min = {"both": thickness / 2.0, "top": 0.0, "bottom": thickness}[s]
+    new_coords = structure.cart_coords + unit * (target_min - proj_min)
+
+    return Structure(new_lat, structure.species, new_coords,
+                     coords_are_cartesian=True)
 
 
 def make_slab(structure, miller="1 1 1", min_slab_size=10.0, min_vacuum_size=15.0,

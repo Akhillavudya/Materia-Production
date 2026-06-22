@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agent import run_agent
+from app.agent import make_plan, run_agent
 from app.api.deps import get_session_for_rel_path, get_session_for_user
 from app.core.config import settings
 from app.core.limiter import limiter
@@ -184,6 +184,70 @@ async def export_session_json(
 
 # ── POST /api/chat ────────────────────────────────────────────────────────────
 
+# A confirmation gate only makes sense for genuinely multi-step workflows.
+_PLAN_GATE_MIN_STEPS = 2
+
+
+def _plan_to_markdown(plan: dict) -> str:
+    """Readable assistant message for a proposed plan (persisted to history)."""
+    lines = ["Here's my plan — review and confirm to run it:", ""]
+    if plan.get("summary"):
+        lines.append(f"**{plan['summary']}**")
+        lines.append("")
+    for i, step in enumerate(plan.get("steps", []), 1):
+        title = step.get("title") or step.get("tool")
+        detail = step.get("detail")
+        lines.append(f"{i}. **{title}** — {detail}" if detail else f"{i}. **{title}**")
+    if plan.get("final_output"):
+        lines.append("")
+        lines.append(f"_You'll get:_ {plan['final_output']}")
+    return "\n".join(lines)
+
+
+async def _save_assistant(session_id: str, text: str, tool_result: str | None) -> None:
+    try:
+        async with AsyncSessionLocal() as save_db:
+            await message_repository.add(
+                save_db,
+                session_id=session_id,
+                role="assistant",
+                content=text,
+                tool_result=tool_result,
+            )
+    except Exception as e:  # noqa: BLE001
+        logger.error("DB save error: %s", e)
+
+
+async def _stream_agent(messages, session_id, user_id, plan=None):
+    """Run the agent, relay its SSE, and persist the assistant turn at the end."""
+    full_response: list[str] = []
+    all_tool_results: list[dict] = []
+
+    async for sse in run_agent(messages, session_id, user_id=user_id, plan=plan):
+        yield sse
+
+        if sse.startswith("data: {"):
+            try:
+                obj = json_lib.loads(sse[6:].strip())
+                if obj.get("type") == "token":
+                    full_response.append(obj["value"])
+            except Exception:
+                pass
+
+        if sse.startswith("data: [FILES:"):
+            try:
+                inner = sse[len("data: [FILES:"):].strip().rstrip("\n")
+                last_brace = inner.rfind("}")
+                if last_brace >= 0:
+                    all_tool_results.append(json_lib.loads(inner[: last_brace + 1]))
+            except Exception as e:
+                logger.warning("FILES parse error: %s", e)
+
+    assistant_text = "".join(full_response)
+    tool_result_str = json_lib.dumps(all_tool_results) if all_tool_results else None
+    await _save_assistant(session_id, assistant_text, tool_result_str)
+
+
 @router.post("/chat")
 @limiter.limit("30/minute")
 async def chat(
@@ -192,43 +256,42 @@ async def chat(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    is_execute = body.plan is not None
+
     # 1. resolve or create session
     if body.session_id:
         session = await get_session_for_user(body.session_id, current_user, db)
+    elif is_execute:
+        raise HTTPException(status_code=400,
+                            detail="Plan execution requires an existing session_id.")
     else:
         session = await session_repository.create(
             db,
             session_id=str(uuid.uuid4()),
             user_id=current_user.id,
-            title=body.message[:60].strip(),
+            title=(body.message[:60].strip() or "New chat"),
         )
 
     await load_user_keys_into_env(current_user.id, db)
 
-    # 2. load history and persist user message
+    # 2. load history. The PLAN phase persists the new user message; the EXECUTE
+    #    phase reuses the message already saved when the plan was proposed.
     history = await message_repository.list_for_session(db, session.id)
-    await message_repository.add(
-        db,
-        session_id=session.id,
-        role="user",
-        content=body.message,
-        tool_result=None,
-    )
+    messages_for_llm = [{"role": m.role, "content": m.content} for m in history]
+    if not is_execute:
+        await message_repository.add(
+            db, session_id=session.id, role="user",
+            content=body.message, tool_result=None,
+        )
+        messages_for_llm.append({"role": "user", "content": body.message})
 
     session_id = session.id
-    messages_for_llm = (
-        [{"role": m.role, "content": m.content} for m in history]
-        + [{"role": "user", "content": body.message}]
-    )
+    user_id = current_user.id
+    plan_in = body.plan
 
-    # 3. streaming generator — powered by the LangGraph agent
+    # 3. streaming generator
     async def token_generator():
-        full_response: list[str] = []
-        all_tool_results: list[dict] = []
-
         # BYOK gate: in a hosted deployment the user must supply their own LLM key.
-        # If none is set, prompt for one (friendly text + inline key form) instead of
-        # letting the agent fail the whole turn with a generic "something went wrong".
         if settings.is_production and not (
             os.getenv("GROQ_API_KEY") or os.getenv("GEMINI_API_KEY")
         ):
@@ -242,40 +305,30 @@ async def chat(
             yield "data: [DONE]\n\n"
             return
 
-        async for sse in run_agent(messages_for_llm, session_id, user_id=current_user.id):
+        # EXECUTE phase — the user already confirmed the plan; just run it.
+        if is_execute:
+            async for sse in _stream_agent(
+                messages_for_llm, session_id, user_id, plan=plan_in):
+                yield sse
+            return
+
+        # PLAN phase — propose a plan first; gate only on multi-tool workflows.
+        yield f"data: [SESSION:{session_id}]\n\n"
+        yield f'data: {json_lib.dumps({"type": "status", "value": "🧭 Planning…"})}\n\n'
+        plan = await make_plan(messages_for_llm)
+        yield f'data: {json_lib.dumps({"type": "status", "value": ""})}\n\n'
+
+        if (plan and plan.get("needs_tools")
+                and len(plan.get("steps", [])) >= _PLAN_GATE_MIN_STEPS):
+            yield f"data: [PLAN:{json_lib.dumps(plan)}]\n\n"
+            yield "data: [DONE]\n\n"
+            await _save_assistant(
+                session_id, _plan_to_markdown(plan), json_lib.dumps({"plan": plan}))
+            return
+
+        # No gate needed (0–1 tools or plain chat) — run directly.
+        async for sse in _stream_agent(messages_for_llm, session_id, user_id):
             yield sse
-
-            if sse.startswith("data: {"):
-                try:
-                    obj = json_lib.loads(sse[6:].strip())
-                    if obj.get("type") == "token":
-                        full_response.append(obj["value"])
-                except Exception:
-                    pass
-
-            if sse.startswith("data: [FILES:"):
-                try:
-                    inner = sse[len("data: [FILES:"):].strip().rstrip("\n")
-                    last_brace = inner.rfind("}")
-                    if last_brace >= 0:
-                        all_tool_results.append(json_lib.loads(inner[: last_brace + 1]))
-                except Exception as e:
-                    logger.warning("FILES parse error: %s", e)
-
-        assistant_text = "".join(full_response)
-        tool_result_str = json_lib.dumps(all_tool_results) if all_tool_results else None
-
-        try:
-            async with AsyncSessionLocal() as save_db:
-                await message_repository.add(
-                    save_db,
-                    session_id=session_id,
-                    role="assistant",
-                    content=assistant_text,
-                    tool_result=tool_result_str,
-                )
-        except Exception as e:
-            logger.error("DB save error: %s", e)
 
     return StreamingResponse(
         token_generator(),
