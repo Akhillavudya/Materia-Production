@@ -42,3 +42,20 @@ export const launchElastic = (sessionId, file, params) =>
 
 export const launchSqs = (sessionId, file, params) =>
   launch(sessionId, 'sqs', file, params, 'Failed to start SQS')
+
+// ── instant structure tools (Step 3): synchronous, return a tool-card envelope
+//    ({ status, files_written, message }) rather than a queued job. ──
+export const launchMakeSupercell = (sessionId, file, params) =>
+  launch(sessionId, 'make_supercell', file, params, 'Failed to build supercell')
+
+export const launchAddVacuum = (sessionId, file, params) =>
+  launch(sessionId, 'add_vacuum', file, params, 'Failed to add vacuum')
+
+export const launchMakeSlab = (sessionId, file, params) =>
+  launch(sessionId, 'make_slab', file, params, 'Failed to make slab')
+
+export const launchAddAdsorbate = (sessionId, file, params) =>
+  launch(sessionId, 'add_adsorbate', file, params, 'Failed to add adsorbate')
+
+export const launchConvertStructure = (sessionId, file, params) =>
+  launch(sessionId, 'convert_structure', file, params, 'Failed to convert structure')

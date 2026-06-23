@@ -1,6 +1,8 @@
 """File upload endpoints."""
 
 import asyncio
+import json
+import time
 import uuid
 from typing import List
 
@@ -14,13 +16,14 @@ from app.core.limiter import limiter
 from app.core.security import get_current_user
 from app.database.db import get_db
 from app.database.models import User
-from app.repositories import session_repository
+from app.repositories import message_repository, session_repository
 from app.schemas.upload import UploadedFileOut
 from app.services.storage.file_service import (
     STORAGE_ROOT,
     get_session_dir,
     get_upload_dir,
     is_upload_allowed,
+    list_new_files,
     sanitize_filename,
     set_session_dir,
 )
@@ -404,4 +407,192 @@ async def launch_neb(
     result = await asyncio.get_running_loop().run_in_executor(None, _run)
     if isinstance(result, dict) and result.get("status") == "error":
         raise HTTPException(status_code=400, detail=result.get("message", "NEB launch failed"))
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Manual structure-tool launchers (Step 2)
+#
+# These mirror the heavy launchers above but for the instant structure tools
+# (make_supercell / add_vacuum / make_slab / add_adsorbate / convert_structure).
+# After the tool runs they record one assistant "action" message in the session
+# so the manual run shows up in the chat timeline as the same tool card the
+# agent produces — tagged ``manual: true``. The agent then reads it back as
+# history, so manual and conversational use share one workflow.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _normalize_status(status: str) -> str:
+    """Match the agent's card status (``ok`` → ``success``); inline to avoid
+    importing the agent graph into the API layer."""
+    return "success" if status == "ok" else (status or "unknown")
+
+
+async def _log_manual_run(
+    db: AsyncSession, session_id: str, *, tool: str, label: str,
+    result: dict, t_before: float,
+) -> None:
+    """Persist a manual tool run as an assistant message with a tool card.
+
+    The card JSON matches what ``fetchMessages`` parses on the frontend
+    (``{tool, label, status, files}``) plus a ``manual`` flag for the badge.
+    ``files`` is scoped to whatever the tool wrote after ``t_before``.
+    """
+    card = {
+        "tool":   tool,
+        "label":  label,
+        "status": _normalize_status(result.get("status", "unknown")),
+        "msg":    result.get("message", ""),
+        "files":  list_new_files(session_id, t_before),
+        "manual": True,
+    }
+    content = result.get("message") or f"Ran {label}"
+    await message_repository.add(
+        db, session_id=session_id, role="assistant",
+        content=content, tool_result=json.dumps([card]),
+    )
+
+
+@router.post("/sessions/{session_id}/make_supercell")
+@limiter.limit("20/minute")
+async def launch_make_supercell(
+    request: Request,
+    session_id: str,
+    structure: UploadFile = File(None),
+    scaling: str = Form("2 2 1"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Build a supercell of the active structure from the UI tool panel."""
+    await get_session_for_user(session_id, current_user, db)
+    name = await _store_optional(session_id, structure)
+    t_before = time.time()
+    from app.tools import material_tools
+    result = await _run_tool_launch(session_id, current_user.id, lambda: material_tools.make_supercell(
+        scaling=scaling,
+        poscar_path=name,
+    ))
+    await _log_manual_run(db, session_id, tool="make_supercell",
+                          label="Supercell", result=result, t_before=t_before)
+    return result
+
+
+@router.post("/sessions/{session_id}/add_vacuum")
+@limiter.limit("20/minute")
+async def launch_add_vacuum(
+    request: Request,
+    session_id: str,
+    structure: UploadFile = File(None),
+    axis: str = Form("c"),
+    thickness: float = Form(15.0),
+    side: str = Form("both"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set the vacuum gap of the active structure from the UI tool panel."""
+    await get_session_for_user(session_id, current_user, db)
+    name = await _store_optional(session_id, structure)
+    t_before = time.time()
+    from app.tools import material_tools
+    result = await _run_tool_launch(session_id, current_user.id, lambda: material_tools.add_vacuum(
+        axis=axis,
+        thickness=float(thickness),
+        side=side,
+        poscar_path=name,
+    ))
+    await _log_manual_run(db, session_id, tool="add_vacuum",
+                          label="Add vacuum", result=result, t_before=t_before)
+    return result
+
+
+@router.post("/sessions/{session_id}/make_slab")
+@limiter.limit("20/minute")
+async def launch_make_slab(
+    request: Request,
+    session_id: str,
+    structure: UploadFile = File(None),
+    miller: str = Form("1 1 1"),
+    layers: int | None = Form(None),
+    min_slab_size: float = Form(10.0),
+    min_vacuum_size: float = Form(15.0),
+    shift: float = Form(0.0),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Cut a surface slab of the active structure from the UI tool panel."""
+    await get_session_for_user(session_id, current_user, db)
+    name = await _store_optional(session_id, structure)
+    t_before = time.time()
+    from app.tools import material_tools
+    result = await _run_tool_launch(session_id, current_user.id, lambda: material_tools.make_slab(
+        miller=miller,
+        layers=(int(layers) if layers is not None else None),
+        min_slab_size=float(min_slab_size),
+        min_vacuum_size=float(min_vacuum_size),
+        shift=float(shift),
+        poscar_path=name,
+    ))
+    await _log_manual_run(db, session_id, tool="make_slab",
+                          label="Make slab", result=result, t_before=t_before)
+    return result
+
+
+@router.post("/sessions/{session_id}/add_adsorbate")
+@limiter.limit("20/minute")
+async def launch_add_adsorbate(
+    request: Request,
+    session_id: str,
+    structure: UploadFile = File(None),
+    molecule: str = Form(...),
+    site_type: str = Form("ontop"),
+    distance: float = Form(2.0),
+    relax: bool = Form(False),
+    calculator_type: str = Form("mace"),
+    calculator_model: str | None = Form(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Adsorb a molecule on the active slab from the UI tool panel.
+
+    ``relax=False`` (default) places the molecule geometrically and returns at
+    once; ``relax=True`` enqueues an AdsorbML-style background job (job_id).
+    """
+    await get_session_for_user(session_id, current_user, db)
+    name = await _store_optional(session_id, structure)
+    t_before = time.time()
+    from app.tools import material_tools
+    result = await _run_tool_launch(session_id, current_user.id, lambda: material_tools.add_adsorbate(
+        molecule=molecule,
+        site_type=site_type,
+        distance=float(distance),
+        relax=bool(relax),
+        calculator_type=calculator_type,
+        calculator_model=calculator_model or None,
+        poscar_path=name,
+    ))
+    await _log_manual_run(db, session_id, tool="add_adsorbate",
+                          label="Add adsorbate", result=result, t_before=t_before)
+    return result
+
+
+@router.post("/sessions/{session_id}/convert_structure")
+@limiter.limit("20/minute")
+async def launch_convert_structure(
+    request: Request,
+    session_id: str,
+    structure: UploadFile = File(None),
+    to_format: str = Form("cif"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Write the active structure in another file format from the UI tool panel."""
+    await get_session_for_user(session_id, current_user, db)
+    name = await _store_optional(session_id, structure)
+    t_before = time.time()
+    from app.tools import material_tools
+    result = await _run_tool_launch(session_id, current_user.id, lambda: material_tools.convert_structure(
+        to_format=to_format,
+        poscar_path=name,
+    ))
+    await _log_manual_run(db, session_id, tool="convert_structure",
+                          label="Convert format", result=result, t_before=t_before)
     return result

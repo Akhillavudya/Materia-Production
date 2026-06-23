@@ -112,6 +112,20 @@ export default function App() {
     setJobRefresh(p => p + 1)
   }
 
+  // A manual tool run (right panel) persisted an "action" message — reload the
+  // chat history so it appears in the timeline, and refresh files/jobs.
+  async function handleManualRun() {
+    if (!activeSessionId) return
+    setFilePanelRefresh(p => p + 1)
+    setJobRefresh(p => p + 1)
+    try {
+      const msgs = await fetchMessages(activeSessionId)
+      setLoadedMessages(msgs)
+    } catch {
+      /* keep current messages on a transient fetch error */
+    }
+  }
+
   function handleRerun(msg) {
     setRerunMessage(msg)
   }
@@ -248,6 +262,7 @@ export default function App() {
           filePanelRefresh={filePanelRefresh}
           jobRefresh={jobRefresh}
           onRerun={handleRerun}
+          onManualRun={handleManualRun}
           onOpenFile={openFile}
         />
       ) : null}

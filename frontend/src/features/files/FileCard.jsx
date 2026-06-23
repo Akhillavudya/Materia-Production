@@ -1,6 +1,6 @@
 import { downloadFile } from '../../api'
 
-export default function FileCard({ toolName, status, files, onOpen }) {
+export default function FileCard({ toolName, status, files, onOpen, manual }) {
   if (!files || files.length === 0) return null
 
   const ok = status === 'success'
@@ -24,16 +24,36 @@ export default function FileCard({ toolName, status, files, onOpen }) {
           marginBottom: '10px',
         }}
       >
-        <span
-          style={{
-            fontSize: '12px',
-            fontWeight: '600',
-            color: 'var(--text-muted)',
-            letterSpacing: '0.05em',
-            textTransform: 'uppercase',
-          }}
-        >
-          {toolName?.replace(/_/g, ' ')}
+        <span style={{ display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
+          <span
+            style={{
+              fontSize: '12px',
+              fontWeight: '600',
+              color: 'var(--text-muted)',
+              letterSpacing: '0.05em',
+              textTransform: 'uppercase',
+            }}
+          >
+            {toolName?.replace(/_/g, ' ')}
+          </span>
+          {manual && (
+            <span
+              style={{
+                fontSize: '9.5px',
+                fontWeight: '600',
+                letterSpacing: '0.04em',
+                textTransform: 'uppercase',
+                color: 'var(--accent-blue, #2563eb)',
+                background: 'var(--accent-blue-wash, #eff6ff)',
+                border: '1px solid #bfdbfe',
+                borderRadius: '999px',
+                padding: '1px 7px',
+                flexShrink: 0,
+              }}
+            >
+              manual
+            </span>
+          )}
         </span>
 
         <span

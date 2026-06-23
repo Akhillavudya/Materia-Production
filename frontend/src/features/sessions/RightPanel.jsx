@@ -14,6 +14,7 @@ export default function RightPanel({
   filePanelRefresh,
   jobRefresh,
   onRerun,
+  onManualRun,
   onOpenFile,
 }) {
   // which tab is active — 'files' or 'jobs'. Controlled by App when provided so
@@ -113,6 +114,7 @@ export default function RightPanel({
             <ToolLaunchPanel
               sessionId={sessionId}
               onLaunched={() => setNebRefresh((n) => n + 1)}
+              onManualRun={() => { setNebRefresh((n) => n + 1); setFileRefresh((n) => n + 1); onManualRun?.() }}
               onUploaded={() => setFileRefresh((n) => n + 1)}
             />
           </div>

@@ -14,6 +14,8 @@ import { TOOL_FORMS } from './toolForms'
 import {
   uploadFiles, fetchSessionFilesGrouped,
   launchOptimize, launchMd, launchPhonons, launchElastic, launchSqs, launchNeb,
+  launchMakeSupercell, launchAddVacuum, launchMakeSlab, launchAddAdsorbate,
+  launchConvertStructure,
 } from '../../api'
 
 // ── visual tokens (theme palette for this panel) ──
@@ -31,6 +33,10 @@ const FONT_MONO = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liber
 const LAUNCHERS = {
   optimize: launchOptimize, md: launchMd, phonons: launchPhonons,
   elastic: launchElastic, sqs: launchSqs,
+  // instant structure tools (Step 3)
+  make_supercell: launchMakeSupercell, add_vacuum: launchAddVacuum,
+  make_slab: launchMakeSlab, add_adsorbate: launchAddAdsorbate,
+  convert_structure: launchConvertStructure,
 }
 
 // ── inline Tabler-style outline icons (dependency-free) ──
@@ -41,6 +47,12 @@ const ICON_PATHS = {
   elastic: ['M12 2 L21 7 L21 17 L12 22 L3 17 L3 7 Z',
             'M12 12 L12 22', 'M12 12 L21 7', 'M12 12 L3 7'],
   neb: ['M6 17 V14 a4 4 0 0 1 4 -4 h4 a4 4 0 0 0 4 -4'],
+  // instant structure tools (Step 3)
+  supercell: ['M4 4 h10 v10 h-10 Z', 'M9 9 h11 v11 h-11 Z'],
+  vacuum: ['M12 3 v18', 'M8 7 l4 -4 l4 4', 'M8 17 l4 4 l4 -4'],
+  slab: ['M3 8 h18', 'M3 12 h18', 'M3 16 h18'],
+  adsorbate: ['M4 19 h16', 'M12 5 v6', 'M9 8 l3 3 l3 -3'],
+  convert: ['M7 7 h10 l-3 -3', 'M17 17 h-10 l3 3'],
 }
 const GRAIN_DOTS = [[6, 6], [12, 5], [18, 7], [5, 12], [12, 12], [19, 12], [7, 18], [13, 18], [18, 17]]
 
@@ -145,7 +157,7 @@ function initialValues(spec) {
   return v
 }
 
-function ToolCard({ sessionId, spec, isOpen, onToggle, onLaunched }) {
+function ToolCard({ sessionId, spec, isOpen, onToggle, onLaunched, onManualRun }) {
   const [file, setFile] = useState(null)
   const [initial, setInitial] = useState(null)
   const [final, setFinal] = useState(null)
@@ -161,6 +173,12 @@ function ToolCard({ sessionId, spec, isOpen, onToggle, onLaunched }) {
     setMsg(null)
     if (spec.twoFiles && (!initial || !final)) {
       setMsg({ kind: 'err', text: 'Pick both an initial and a final structure.' }); return
+    }
+    // client-side guard for any required text field (e.g. adsorbate molecule)
+    const missing = (spec.fields || []).find(
+      (f) => f.required && !String(values[f.name] ?? '').trim())
+    if (missing) {
+      setMsg({ kind: 'err', text: `${missing.label} is required.` }); return
     }
     setBusy(true)
     try {
@@ -178,12 +196,19 @@ function ToolCard({ sessionId, spec, isOpen, onToggle, onLaunched }) {
         }
         res = await LAUNCHERS[spec.endpoint](sessionId, file, params)
       }
-      const id = (res.job_id || '').slice(0, 8)
-      setMsg({ kind: 'ok', text: `Job started${id ? ` (${id})` : ''}. Tracking above.` })
+      // A queued job (heavy tools + relaxed adsorption) carries a job_id and is
+      // tracked above. An instant tool returns its result straight into chat.
+      if (res.job_id) {
+        const id = res.job_id.slice(0, 8)
+        setMsg({ kind: 'ok', text: `Job started (${id}). Tracking above.` })
+        onLaunched?.()
+      } else {
+        setMsg({ kind: 'ok', text: '✓ Done — added to the chat.' })
+        onManualRun?.()
+      }
       setFile(null); setInitial(null); setFinal(null)
-      onLaunched?.()
     } catch (e) {
-      setMsg({ kind: 'err', text: e.message || 'Failed to start job.' })
+      setMsg({ kind: 'err', text: e.message || 'Failed to run tool.' })
     } finally {
       setBusy(false)
     }
@@ -342,7 +367,7 @@ function detectActive(groups) {
   return active ? active.name : null
 }
 
-export default function ToolLaunchPanel({ sessionId, onLaunched, onUploaded }) {
+export default function ToolLaunchPanel({ sessionId, onLaunched, onManualRun, onUploaded }) {
   const [openKey, setOpenKey] = useState(null)
   const [detectedName, setDetectedName] = useState(null)
   const [uploadedName, setUploadedName] = useState(null)
@@ -375,7 +400,7 @@ export default function ToolLaunchPanel({ sessionId, onLaunched, onUploaded }) {
           fontFamily: FONT_DISPLAY, fontSize: 11.5, fontWeight: 700, letterSpacing: '0.04em',
           textTransform: 'uppercase', color: T.inkSoft,
         }}>
-          Run a simulation
+          Run a tool
         </span>
         <span style={{
           fontFamily: FONT_BODY, fontSize: 10.5, color: T.inkFaint,
@@ -398,6 +423,7 @@ export default function ToolLaunchPanel({ sessionId, onLaunched, onUploaded }) {
             isOpen={openKey === spec.key}
             onToggle={toggle}
             onLaunched={onLaunched}
+            onManualRun={onManualRun}
           />
         ))}
       </div>

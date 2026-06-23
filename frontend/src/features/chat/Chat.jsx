@@ -762,6 +762,7 @@ export default function Chat({
                               label={card.label}
                               status={card.status}
                               files={card.files}
+                              manual={card.manual}
                               onOpen={onOpenFile}
                             />
                           )}

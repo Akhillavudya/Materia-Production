@@ -13,6 +13,87 @@
  */
 
 export const TOOL_FORMS = [
+  // ── instant structure tools (Step 3): run synchronously and post the result
+  //    straight into the chat timeline as a tool card (no background job). ──
+  {
+    key: 'make_supercell',
+    label: 'Supercell',
+    category: 'Structure',
+    color: '#0E7C66',
+    icon: 'supercell',
+    description: 'Replicate the active cell into a larger supercell.',
+    endpoint: 'make_supercell',
+    instant: true,
+    fields: [
+      { name: 'scaling', label: 'Scaling', type: 'text', default: '2 2 1', placeholder: '2 2 1  or  2' },
+    ],
+  },
+  {
+    key: 'add_vacuum',
+    label: 'Add Vacuum',
+    category: 'Structure',
+    color: '#2E8B8B',
+    icon: 'vacuum',
+    description: 'Set the vacuum gap along one axis to an exact thickness.',
+    endpoint: 'add_vacuum',
+    instant: true,
+    fields: [
+      { name: 'axis', label: 'Axis', type: 'select', default: 'c',
+        options: [['a', 'a'], ['b', 'b'], ['c', 'c']] },
+      { name: 'thickness', label: 'Thickness (Å)', type: 'number', default: 15.0, step: 0.5, min: 0 },
+      { name: 'side', label: 'Side', type: 'select', default: 'both',
+        options: [['both', 'both'], ['top', 'top'], ['bottom', 'bottom']] },
+    ],
+  },
+  {
+    key: 'make_slab',
+    label: 'Make Slab',
+    category: 'Structure',
+    color: '#1F8A70',
+    icon: 'slab',
+    description: 'Cut a surface slab along a Miller index (vacuum included).',
+    endpoint: 'make_slab',
+    instant: true,
+    fields: [
+      { name: 'miller', label: 'Miller (hkl)', type: 'text', default: '1 1 1' },
+      { name: 'layers', label: 'Layers (blank = by size)', type: 'number', default: '', min: 1 },
+      { name: 'min_slab_size', label: 'Min slab (Å)', type: 'number', default: 10.0, step: 1, min: 1 },
+      { name: 'min_vacuum_size', label: 'Min vacuum (Å)', type: 'number', default: 15.0, step: 1, min: 0 },
+      { name: 'shift', label: 'Shift', type: 'number', default: 0.0, step: 0.1 },
+    ],
+  },
+  {
+    key: 'add_adsorbate',
+    label: 'Add Adsorbate',
+    category: 'Surface',
+    color: '#C06B2E',
+    icon: 'adsorbate',
+    description: 'Place a molecule on the active slab (optional accurate relax).',
+    endpoint: 'add_adsorbate',
+    instant: true,
+    calculator: true,
+    fields: [
+      { name: 'molecule', label: 'Molecule', type: 'text', default: '', placeholder: 'CO2', required: true },
+      { name: 'site_type', label: 'Site', type: 'select', default: 'ontop',
+        options: [['ontop', 'ontop'], ['bridge', 'bridge'], ['hollow', 'hollow']] },
+      { name: 'distance', label: 'Distance (Å)', type: 'number', default: 2.0, step: 0.1, min: 0.5 },
+      { name: 'relax', label: 'Relax (accurate — runs a job)', type: 'checkbox', default: false },
+    ],
+  },
+  {
+    key: 'convert_structure',
+    label: 'Convert Format',
+    category: 'Format',
+    color: '#5C6BC0',
+    icon: 'convert',
+    description: 'Write the active structure in another file format.',
+    endpoint: 'convert_structure',
+    instant: true,
+    fields: [
+      { name: 'to_format', label: 'Format', type: 'select', default: 'cif',
+        options: [['cif', 'CIF'], ['poscar', 'POSCAR'], ['xyz', 'XYZ'], ['cssr', 'CSSR'], ['json', 'JSON']] },
+    ],
+  },
   {
     key: 'optimize',
     label: 'Optimize',

@@ -26,6 +26,7 @@ export async function fetchMessages(sessionId) {
             label: r.label || r.tool,
             status: r.status,
             files: r.files || [],
+            manual: !!r.manual,
           }))
         } else if (parsed && typeof parsed === 'object') {
           toolCards = [{
@@ -33,6 +34,7 @@ export async function fetchMessages(sessionId) {
             label: parsed.label || parsed.tool,
             status: parsed.status,
             files: parsed.files || [],
+            manual: !!parsed.manual,
           }]
         }
       } catch {
