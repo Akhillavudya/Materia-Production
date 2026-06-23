@@ -281,26 +281,55 @@ def add_vacuum(structure, axis="c", thickness=15.0, side="both"):
 
 
 def make_slab(structure, miller="1 1 1", min_slab_size=10.0, min_vacuum_size=15.0,
-              center_slab=True, lll_reduce=True, shift=0.0):
+              center_slab=True, lll_reduce=True, shift=0.0, layers=None):
     """Cut a surface slab from a bulk structure along a Miller plane.
 
     Uses pymatgen's ``SlabGenerator``, which **already adds the vacuum gap**
     (`min_vacuum_size`) — do not also call add_vacuum. Miller indices are defined
     against the conventional cell, so the bulk is converted to its conventional
     standard form first (falling back to the input if symmetry analysis fails).
+
+    If ``layers`` is given, the slab is sized to EXACTLY that many distinct atomic
+    planes along the surface normal (the slab is over-generated in unit-plane mode,
+    then the excess planes are trimmed from the top). This is what users mean by
+    "N-layer slab"; ``min_slab_size`` (a thickness in Å) is ignored in that case.
+    Without ``layers`` the original Å-thickness behaviour is unchanged.
     """
     from pymatgen.core.surface import SlabGenerator
     from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 
     hkl = _parse_miller(miller)
-    if float(min_slab_size) <= 0 or float(min_vacuum_size) <= 0:
-        raise ValueError("min_slab_size and min_vacuum_size must be > 0 Å.")
+    if float(min_vacuum_size) <= 0:
+        raise ValueError("min_vacuum_size must be > 0 Å.")
 
     try:
         conv = SpacegroupAnalyzer(structure).get_conventional_standard_structure()
     except Exception:  # noqa: BLE001 — degrade to the raw cell
         conv = structure
 
+    if layers is not None:
+        n_layers = int(layers)
+        if n_layers < 1:
+            raise ValueError("layers must be a positive integer.")
+        if float(min_vacuum_size) <= 0:
+            raise ValueError("min_vacuum_size must be > 0 Å.")
+        # In unit-plane mode SlabGenerator interprets BOTH sizes as plane counts, so
+        # we request a tiny placeholder vacuum here and set the real Å gap afterwards.
+        # lll_reduce is forced off: it can tilt the c-vector off the surface normal,
+        # which would make the atomic-plane count unreliable. (lll_reduce is ignored
+        # when layers is set.)
+        sg = SlabGenerator(
+            conv, hkl, min_slab_size=n_layers, min_vacuum_size=1,
+            in_unit_planes=True, lll_reduce=False,
+            center_slab=False, primitive=False, reorient_lattice=True,
+        )
+        from app.services.structure.slab_builder import _enforce_layer_count
+        slab = _enforce_layer_count(sg.get_slab(shift=float(shift)), n_layers)
+        side = "both" if center_slab else "top"
+        return add_vacuum(slab, axis="c", thickness=float(min_vacuum_size), side=side)
+
+    if float(min_slab_size) <= 0:
+        raise ValueError("min_slab_size must be > 0 Å.")
     sg = SlabGenerator(
         conv, hkl, float(min_slab_size), float(min_vacuum_size),
         lll_reduce=bool(lll_reduce), center_slab=bool(center_slab),

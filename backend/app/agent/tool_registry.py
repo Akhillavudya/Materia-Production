@@ -7,8 +7,10 @@ the executor never drift from the actual tool signatures.
 
 from app.tools import material_tools
 from app.tools.contracts import (
+    AddAdsorbateInput,
     AddVacuumInput,
     AnalyzeSymmetryInput,
+    BuildSlabInput,
     ComputeElasticInput,
     ComputeNebInput,
     ComputePhononInput,
@@ -38,6 +40,8 @@ _TOOL_SPECS = [
     ("make_supercell",       "Building supercell",           MakeSupercellInput),
     ("add_vacuum",           "Adding vacuum",                AddVacuumInput),
     ("make_slab",            "Building surface slab",        MakeSlabInput),
+    ("build_slab",           "Building surface slab (N layers + supercell + vacuum)", BuildSlabInput),
+    ("add_adsorbate",        "Adsorbing molecule on surface", AddAdsorbateInput),
     ("convert_structure",    "Converting structure format",  ConvertStructureInput),
     ("analyze_symmetry",     "Analyzing symmetry",           AnalyzeSymmetryInput),
     ("create_vacancy",       "Creating vacancy defect",      CreateVacancyInput),

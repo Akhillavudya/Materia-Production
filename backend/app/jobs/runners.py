@@ -32,6 +32,7 @@ _ARTIFACT_KIND = {
     "bestcorr_out": "data", "mcsqs_progress_csv": "data",
     "neb_mep": "plot", "neb_path_csv": "data", "neb_traj": "trajectory",
     "saddle_poscar": "structure",
+    "adsorption_csv": "data",
 }
 
 
@@ -167,6 +168,20 @@ def _run(job_id: str, job_type: JobType) -> None:
                 calculator=calc,
                 progress_callback=reporter,
             )
+        elif job_type is JobType.ADSORPTION:
+            from app.services.structure.adsorption import relax_adsorption
+            result = relax_adsorption(
+                poscar_path=spec["poscar_path"],
+                molecule=params["molecule"],
+                output_dir=spec["output_dir"],
+                calculator=calc,
+                distance=params.get("distance", 2.0),
+                site_types=tuple(params.get("site_types", ("ontop", "bridge", "hollow"))),
+                max_configs=params.get("max_configs", 6),
+                fmax=params.get("fmax", 0.05),
+                max_steps=params.get("max_steps", 200),
+                progress_callback=reporter,
+            )
         else:
             raise ValueError(f"Unknown job type: {job_type}")
     except Exception as exc:  # noqa: BLE001 — any failure → job failed, not a crash
@@ -243,3 +258,8 @@ def run_sqs_job(self, job_id: str) -> None:         # noqa: ARG001
 @celery_app.task(name="jobs.neb", bind=True)
 def run_neb_job(self, job_id: str) -> None:         # noqa: ARG001
     _run(job_id, JobType.NEB)
+
+
+@celery_app.task(name="jobs.adsorption", bind=True)
+def run_adsorption_job(self, job_id: str) -> None:  # noqa: ARG001
+    _run(job_id, JobType.ADSORPTION)

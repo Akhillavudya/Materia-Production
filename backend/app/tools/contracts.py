@@ -257,8 +257,12 @@ class AddVacuumInput(_StructureSourceInput):
 class MakeSlabInput(_StructureSourceInput):
     miller: str = Field(
         "1 1 1", description='Miller index of the surface, e.g. "1 1 1"')
+    layers: Optional[int] = Field(
+        None,
+        description="exact number of atomic layers (planes) — set this when the user "
+                    'asks for "N layers"; it overrides min_slab_size')
     min_slab_size: float = Field(
-        10.0, description="minimum slab thickness in Å")
+        10.0, description="minimum slab thickness in Å (ignored when layers is set)")
     min_vacuum_size: float = Field(
         15.0, description="vacuum gap in Å (the slab already includes this vacuum)")
     center: bool = Field(
@@ -267,6 +271,40 @@ class MakeSlabInput(_StructureSourceInput):
         True, description="LLL-reduce the slab cell")
     shift: float = Field(
         0.0, description="termination shift (selects which surface cut)")
+
+
+class BuildSlabInput(_StructureSourceInput):
+    miller: str = Field(
+        "1 1 1", description='Miller index of the surface, e.g. "1 0 0"')
+    n_layers: int = Field(
+        4, ge=1, description="exact number of atomic layers (planes) in the slab")
+    supercell: str = Field(
+        "1 1", description='in-plane supercell, e.g. "2 2" or "4 4" (out-of-plane stays 1)')
+    vacuum_angstrom: float = Field(
+        20.0, gt=0, description="total vacuum gap to add along c, in Å")
+    vacuum_mode: str = Field(
+        "symmetric",
+        description='"symmetric" (vacuum split above/below, slab centred) or '
+                    '"top_only" (all vacuum above the slab)')
+
+
+class AddAdsorbateInput(_StructureSourceInput):
+    molecule: str = Field(
+        ..., description='adsorbate molecule formula, e.g. "CO2", "CO", "H2O", "O", "H"')
+    site_type: str = Field(
+        "ontop", description='adsorption site: "ontop" (default), "bridge" or "hollow"')
+    distance: float = Field(
+        2.0, gt=0, description="height of the adsorbate above the surface site, in Å")
+    relax: bool = Field(
+        False,
+        description="if true, run an accurate AdsorbML-style job: enumerate placements, "
+                    "ML-relax them and return the lowest adsorption-energy structure "
+                    "(long-running, returns a job_id). If false, place it geometrically "
+                    "and return immediately.")
+    calculator_type: Optional[str] = Field(
+        None, description='ML potential for relax mode: "mace" (default) or "mattersim"')
+    calculator_model: Optional[str] = Field(
+        None, description="specific model name for relax mode (optional)")
 
 
 class ConvertStructureInput(_StructureSourceInput):

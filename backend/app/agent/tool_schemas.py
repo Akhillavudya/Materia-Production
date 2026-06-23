@@ -14,8 +14,10 @@ from pydantic import BaseModel
 
 from app.agent.providers.base import ToolSpec
 from app.tools.contracts import (
+    AddAdsorbateInput,
     AddVacuumInput,
     AnalyzeSymmetryInput,
+    BuildSlabInput,
     ConvertStructureInput,
     CreateInterstitialInput,
     CreateSubstitutionInput,
@@ -75,10 +77,32 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
         "poscar_path / material_id."
     ),
     "make_slab": (
-        "Cut a surface slab along `miller` (e.g. '1 1 1') with `min_slab_size` and "
-        "`min_vacuum_size` Å, saved as the active POSCAR. Vacuum is INCLUDED, so do "
-        "not also call add_vacuum. `shift` selects the surface termination. Operates "
-        "on the active session structure by default, or pass poscar_path / material_id."
+        "Cut a surface slab along `miller` (e.g. '1 1 1'), saved as the active POSCAR. "
+        "Set `layers` for an EXACT atomic-layer count (what the user means by 'N "
+        "layers'); otherwise the slab is `min_slab_size` Å thick. Vacuum "
+        "(`min_vacuum_size` Å) is INCLUDED, so do not also call add_vacuum. `shift` "
+        "selects the surface termination. For a slab PLUS an in-plane supercell and a "
+        "precise vacuum in one step, use build_slab. Operates on the active session "
+        "structure by default, or pass poscar_path / material_id."
+    ),
+    "build_slab": (
+        "Build a ready-to-use surface slab in ONE call: an exact-layer-count (hkl) slab, "
+        "an in-plane supercell, and a precise vacuum gap. Use this for requests like 'a "
+        "2x2 Cu(100) slab with 4 layers and 20 Å of vacuum'. `n_layers` is the exact "
+        "number of atomic planes; `supercell` is the in-plane replication (e.g. '2 2'); "
+        "`vacuum_angstrom` is the total gap; `vacuum_mode` is 'symmetric' (centred) or "
+        "'top_only' (all vacuum above). Saves POSCAR (active) + CIF + a provenance JSON. "
+        "Operates on the active session structure by default, or pass poscar_path / "
+        "material_id. Prefer this over chaining make_slab + make_supercell + add_vacuum."
+    ),
+    "add_adsorbate": (
+        "Adsorb a molecule (e.g. CO2, CO, H2O, O, H) onto the active surface slab. By "
+        "default it places the molecule geometrically on an auto-picked site (first "
+        "symmetry-reduced `site_type`, 'ontop' by default) at `distance` Å above the "
+        "surface and saves it as the active POSCAR (fast). Set `relax=true` for an "
+        "accurate AdsorbML-style background job that enumerates placements, relaxes them "
+        "with an ML potential, and returns the lowest adsorption-energy structure (returns "
+        "a job_id). The active structure should be a slab first (build_slab / make_slab)."
     ),
     "convert_structure": (
         "Write a structure in another file format (`to_format`: poscar/cif/xyz/cssr/"
@@ -145,6 +169,8 @@ _TOOL_MODELS: list[tuple[str, type[BaseModel]]] = [
     ("make_supercell", MakeSupercellInput),
     ("add_vacuum", AddVacuumInput),
     ("make_slab", MakeSlabInput),
+    ("build_slab", BuildSlabInput),
+    ("add_adsorbate", AddAdsorbateInput),
     ("convert_structure", ConvertStructureInput),
     ("analyze_symmetry", AnalyzeSymmetryInput),
     ("create_vacancy", CreateVacancyInput),

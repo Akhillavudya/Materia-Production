@@ -22,6 +22,7 @@ class JobType(str, Enum):
     PHONON = "phonon"
     SQS = "sqs"
     NEB = "neb"
+    ADSORPTION = "adsorption"
 
 
 class JobStatus(str, Enum):

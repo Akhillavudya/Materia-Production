@@ -671,6 +671,7 @@ def add_vacuum(
 
 def make_slab(
     miller:          str   = "1 1 1",
+    layers:          Optional[int] = None,
     min_slab_size:   float = 10.0,
     min_vacuum_size: float = 15.0,
     center:          bool  = True,
@@ -682,11 +683,13 @@ def make_slab(
 ) -> dict:
     """Cut a surface slab along a Miller index and save it as the active POSCAR.
 
-    Cuts along `miller` (e.g. "1 1 1") with `min_slab_size` and `min_vacuum_size`
-    Å. Vacuum is INCLUDED in the result — do NOT also call add_vacuum. `shift`
-    selects which surface termination; `lll_reduce` reduces the slab cell.
+    Cuts along `miller` (e.g. "1 1 1"). Set `layers` for an EXACT atomic-layer count
+    (what users mean by "N layers"); otherwise the slab is sized to `min_slab_size`
+    Å thick. Vacuum (`min_vacuum_size` Å) is INCLUDED — do NOT also call add_vacuum.
+    `shift` selects which surface termination; `lll_reduce` reduces the slab cell.
     Operates on the active session structure by default; pass `poscar_path` for a
     specific session file or `material_id` (+ `source`) to fetch one from a database.
+    For a slab PLUS an in-plane supercell and a precise vacuum, prefer build_slab.
     """
     try:
         structure = _resolve_build_input(material_id, source, poscar_path)
@@ -695,7 +698,7 @@ def make_slab(
 
     n_before = len(structure)
     try:
-        result = builder.make_slab(structure, miller=miller,
+        result = builder.make_slab(structure, miller=miller, layers=layers,
                                    min_slab_size=min_slab_size,
                                    min_vacuum_size=min_vacuum_size,
                                    center_slab=center, lll_reduce=lll_reduce,
@@ -705,8 +708,147 @@ def make_slab(
 
     abc = [round(x, 4) for x in result.lattice.abc]
     tag = _build_tag("make_slab", miller=miller)
-    detail = f"({miller}) slab with {len(result)} atoms, abc = {abc} Å"
+    size = f"{layers}-layer" if layers is not None else f"{min_slab_size} Å"
+    detail = f"({miller}) {size} slab with {len(result)} atoms, abc = {abc} Å"
     return _finish_build(result, "make_slab", n_before, tag=tag, detail=detail)
+
+
+def build_slab(
+    miller:          str   = "1 1 1",
+    n_layers:        int   = 4,
+    supercell:       str   = "1 1",
+    vacuum_angstrom: float = 20.0,
+    vacuum_mode:     str   = "symmetric",
+    material_id:     Optional[str] = None,
+    source:          Optional[str] = None,
+    poscar_path:     Optional[str] = None,
+) -> dict:
+    """Build a ready-to-use surface slab: exact layer count + in-plane supercell + vacuum.
+
+    One call for the common workflow "an N-layer (hkl) slab, M×N in-plane, with V Å of
+    vacuum". The layer count is EXACT (distinct atomic planes, not an Å thickness), the
+    in-plane supercell leaves the c-axis untouched, and the vacuum gap is set precisely
+    (`vacuum_mode`: "symmetric" centres the slab, "top_only" puts all vacuum above).
+    Saves POSCAR (active for the next step) plus a CIF and a sidecar JSON recording the
+    provenance (source, Miller, layers, vacuum, supercell, pymatgen version). Operates on
+    the active session structure by default; pass `poscar_path` / `material_id` (+ `source`).
+    """
+    from app.services.structure import slab_builder
+
+    try:
+        structure = _resolve_build_input(material_id, source, poscar_path)
+    except _StructureError as e:
+        return {"status": "error", "message": str(e)}
+
+    n_before = len(structure)
+    label = f"{source}:{material_id}" if material_id else None
+    try:
+        slab, metadata = slab_builder.build_slab(
+            structure, miller_index=miller, n_layers=n_layers, supercell=supercell,
+            vacuum_angstrom=vacuum_angstrom, vacuum_mode=vacuum_mode, source_label=label)
+    except Exception as e:  # noqa: BLE001
+        return {"status": "error", "message": f"build_slab failed: {e}"}
+
+    if len(slab) > settings.max_atoms:
+        return {"status": "error",
+                "message": (f"The slab has {len(slab)} atoms, above the "
+                            f"{settings.max_atoms}-atom limit on this server. "
+                            "Use fewer layers or a smaller supercell.")}
+
+    try:
+        ex = slab_builder.export_slab(slab, metadata, session_dir())
+    except Exception as e:  # noqa: BLE001
+        return {"status": "error", "message": f"Could not write the slab: {e}"}
+
+    return {
+        "status":         "success",
+        "operation":      "build_slab",
+        "formula":        metadata["formula"],
+        "n_sites_before": n_before,
+        "n_sites":        metadata["n_atoms"],
+        "n_layers":       metadata["n_layers"],
+        "supercell":      metadata["supercell_matrix"],
+        "vacuum_mode":    metadata["vacuum_mode"],
+        "measured_vacuum_angstrom": metadata["measured_vacuum_angstrom"],
+        "lattice_abc":    metadata["lattice_abc"],
+        "files_written":  ex["files_written"],
+        "message": (
+            f"build_slab: ({miller}) {metadata['n_layers']}-layer "
+            f"{metadata['formula']} slab, {metadata['supercell_matrix'][0][0]}×"
+            f"{metadata['supercell_matrix'][1][1]} in-plane, "
+            f"{metadata['measured_vacuum_angstrom']} Å {metadata['vacuum_mode']} vacuum "
+            f"({metadata['n_atoms']} atoms). Wrote {ex['files_written'][0]} "
+            "(active as POSCAR) + CIF + provenance JSON."
+        ),
+    }
+
+
+def add_adsorbate(
+    molecule:         str,
+    site_type:        str   = "ontop",
+    distance:         float = 2.0,
+    relax:            bool  = False,
+    calculator_type:  Optional[str] = None,
+    calculator_model: Optional[str] = None,
+    material_id:      Optional[str] = None,
+    source:           Optional[str] = None,
+    poscar_path:      Optional[str] = None,
+) -> dict:
+    """Adsorb a molecule (e.g. CO2) onto the active surface slab.
+
+    Default (relax=False): place the molecule geometrically on an auto-picked site
+    (first symmetry-reduced `site_type`, "ontop" by default) at `distance` Å above the
+    surface, save it as the active POSCAR, and return immediately.
+
+    relax=True: run an accurate AdsorbML-style background job — enumerate placements,
+    relax each with an ML potential (MACE/MatterSim), discard desorbed/dissociated
+    configs, and return the lowest adsorption-energy structure. Returns a job_id.
+
+    Operates on the active session structure (which should be a slab — use build_slab /
+    make_slab first); pass `poscar_path` / `material_id` (+ `source`) for another source.
+    """
+    from app.services.structure import adsorption
+
+    if relax:
+        try:
+            slab_path = find_structure_in_session(poscar_path)
+        except FileNotFoundError as e:
+            return {"status": "error", "message": str(e)}
+        calc_cfg = _resolve_calculator(calculator_type, calculator_model)
+        if calc_cfg.get("status") == "error":
+            return calc_cfg
+        result = _enqueue_job(
+            JobType.ADSORPTION,
+            poscar_path=slab_path,
+            output_dir=session_path() / "adsorption",
+            params={"molecule": molecule, "site_type": site_type,
+                    "distance": float(distance)},
+            calculator=calc_cfg,
+            emit_vasp_inputs=False,
+        )
+        if result.get("status") == "queued":
+            result["calculator"] = calc_cfg
+            result["message"] = (
+                f"{result['message']} Relaxing {molecule} adsorption with "
+                f"{_calc_label(calc_cfg)}.")
+        return result
+
+    try:
+        structure = _resolve_build_input(material_id, source, poscar_path)
+    except _StructureError as e:
+        return {"status": "error", "message": str(e)}
+
+    n_before = len(structure)
+    try:
+        result = adsorption.place_adsorbate(structure, molecule=molecule,
+                                            site_type=site_type, distance=distance)
+    except Exception as e:  # noqa: BLE001
+        return {"status": "error", "message": f"add_adsorbate failed: {e}"}
+
+    tag = f"ads-{str(molecule).strip().lower()}"
+    detail = (f"{molecule} on {site_type} site (+{len(result) - n_before} atoms); "
+              f"now {len(result)} atoms")
+    return _finish_build(result, "add_adsorbate", n_before, tag=tag, detail=detail)
 
 
 def convert_structure(
