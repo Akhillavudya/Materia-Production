@@ -19,7 +19,7 @@ function kindOf(name) {
  * the sidebar + right panel hidden. Previews images, HTML (interactive), and any
  * readable text/code; falls back to a download prompt for binary files.
  */
-export default function FileViewer({ relPath, fileName, onClose }) {
+export default function FileViewer({ className, isMobile = false, relPath, fileName, onClose }) {
   const kind = kindOf(fileName)
   const [content, setContent] = useState('')
   const [imgUrl, setImgUrl] = useState(null)
@@ -31,7 +31,8 @@ export default function FileViewer({ relPath, fileName, onClose }) {
 
   // ── drag-to-resize + maximize ──────────────────────────────────────────────
   const MIN_W = 360
-  const [width, setWidth] = useState(() => Math.round(window.innerWidth * 0.58))
+  // open at a balanced 50/50 split with the chat; user can drag to resize
+  const [width, setWidth] = useState(() => Math.round(window.innerWidth * 0.5))
   const prevWidthRef = useRef(null)
 
   function startDrag(e) {
@@ -111,14 +112,16 @@ export default function FileViewer({ relPath, fileName, onClose }) {
   const lines = content ? content.split('\n') : []
 
   return (
-    <div style={{ ...s.wrap, width }}>
-      {/* drag handle — left edge, resize the viewer (Claude-style) */}
-      <div
-        style={s.handle}
-        onMouseDown={startDrag}
-        onDoubleClick={toggleMax}
-        title="Drag to resize · double-click to maximize"
-      />
+    <div className={className} style={{ ...s.wrap, width: isMobile ? '100%' : width }}>
+      {/* drag handle — left edge, resize the viewer (Claude-style; desktop only) */}
+      {!isMobile && (
+        <div
+          style={s.handle}
+          onMouseDown={startDrag}
+          onDoubleClick={toggleMax}
+          title="Drag to resize · double-click to maximize"
+        />
+      )}
 
       {/* ── header ── */}
       <div style={s.header}>
@@ -134,9 +137,11 @@ export default function FileViewer({ relPath, fileName, onClose }) {
           <button style={s.btn} onClick={handleCopy}>{copied ? '✓ Copied' : 'Copy'}</button>
         )}
         <button style={s.btn} onClick={() => downloadFile(relPath, fileName)}>↓ Download</button>
-        <button style={s.closeBtn} onClick={toggleMax} title={maximized ? 'Restore size' : 'Maximize'}>
-          {maximized ? '⤡' : '⤢'}
-        </button>
+        {!isMobile && (
+          <button style={s.closeBtn} onClick={toggleMax} title={maximized ? 'Restore size' : 'Maximize'}>
+            {maximized ? '⤡' : '⤢'}
+          </button>
+        )}
         <button style={s.closeBtn} onClick={onClose} title="Close (Esc)">✕</button>
       </div>
 

@@ -27,7 +27,7 @@ export default function PlanCard({ plan, planState, onConfirm, onCancel }) {
   return (
     <div style={{
       marginTop: '12px',
-      background: '#ffffff',
+      background: 'var(--bg-elevated)',
       border: '1px solid var(--border)',
       borderRadius: '14px',
       padding: '16px 18px',
@@ -131,12 +131,12 @@ export default function PlanCard({ plan, planState, onConfirm, onCancel }) {
             onClick={onCancel}
             style={{
               padding: '9px 16px', borderRadius: '10px',
-              border: '1px solid var(--border)', background: '#ffffff',
+              border: '1px solid var(--border)', background: 'var(--bg-elevated)',
               color: 'var(--text-secondary)', fontSize: '13px', fontWeight: 500,
               cursor: 'pointer', fontFamily: 'var(--font)',
             }}
             onMouseEnter={e => (e.currentTarget.style.background = 'var(--hover-bg)')}
-            onMouseLeave={e => (e.currentTarget.style.background = '#ffffff')}
+            onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-elevated)')}
           >
             Cancel
           </button>

@@ -4,10 +4,10 @@ import StructureViewer from '../viewer/StructureViewer'
 
 // ── palette (kept local to this panel, matching the method-card launcher) ──
 const T = {
-  surface: '#FFFFFF',
-  ink: '#10221F', inkSoft: '#5C6864', inkFaint: '#8B9591',
+  surface: 'var(--bg-elevated)',
+  ink: 'var(--text-primary)', inkSoft: 'var(--text-secondary)', inkFaint: 'var(--text-muted)',
   border: 'var(--border)',
-  teal: '#00B4A6', tealDeep: '#007F76', tealWash: '#E6F8F5',
+  teal: '#00B4A6', tealDeep: '#0d9488', tealWash: 'var(--hover-bg)',
 }
 const FONT_MONO = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace'
 

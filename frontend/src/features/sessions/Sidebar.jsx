@@ -2,7 +2,47 @@ import { useEffect, useState, useRef } from 'react'
 import { fetchSessions, downloadSessionTxt, downloadSessionJson } from '../../api'
 import { LogoMark } from '../../components/Logo'
 
-export default function Sidebar({ activeSessionId, onSelectSession, onNewChat, user, onSignOut, onOpenSettings }) {
+// One clean nav row — icon + label, subtle hover (Claude-style).
+function NavRow({ icon, label, onClick, disabled, title }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title || label}
+      style={{
+        width: '100%', display: 'flex', alignItems: 'center', gap: '11px',
+        padding: '9px 12px', minHeight: '40px',
+        background: 'none', border: 'none', borderRadius: 'var(--radius-sm)',
+        color: disabled ? 'var(--text-muted)' : 'var(--text-secondary)',
+        fontSize: '14px', fontWeight: 500, fontFamily: 'var(--font)',
+        cursor: disabled ? 'not-allowed' : 'pointer', textAlign: 'left',
+        opacity: disabled ? 0.55 : 1, transition: 'background 0.12s',
+      }}
+      onMouseEnter={e => { if (!disabled) e.currentTarget.style.background = 'var(--hover-bg)' }}
+      onMouseLeave={e => { e.currentTarget.style.background = 'none' }}
+    >
+      <span style={{ fontSize: '16px', width: '18px', textAlign: 'center', flexShrink: 0 }}>{icon}</span>
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+    </button>
+  )
+}
+
+export default function Sidebar({
+  className,
+  isMobile = false,
+  onClose,
+  onCollapse,
+  hasSession = false,
+  onOpenTools,
+  activeSessionId,
+  onSelectSession,
+  onNewChat,
+  user,
+  onSignOut,
+  onOpenSettings,
+  theme = 'light',
+  onToggleTheme,
+}) {
   const [sessions, setSessions] = useState([])
   const [openMenu, setOpenMenu] = useState(null)
   const [profileOpen, setProfileOpen] = useState(false)
@@ -64,7 +104,7 @@ export default function Sidebar({ activeSessionId, onSelectSession, onNewChat, u
   }
 
   return (
-    <div style={{
+    <div className={className} style={{
       width: 'var(--sidebar-width)',
       minWidth: 'var(--sidebar-width)',
       height: '100vh',
@@ -90,40 +130,76 @@ export default function Sidebar({ activeSessionId, onSelectSession, onNewChat, u
         }}>
           Materia
         </span>
+
+        {/* collapse (desktop) / close drawer (mobile) — the "disappear" control */}
+        <button
+          onClick={isMobile ? onClose : onCollapse}
+          aria-label={isMobile ? 'Close menu' : 'Hide sidebar'}
+          title={isMobile ? 'Close' : 'Hide sidebar'}
+          style={{
+            marginLeft: 'auto', width: '38px', height: '38px',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'none', border: 'none', borderRadius: 'var(--radius-sm)',
+            color: 'var(--text-secondary)', fontSize: isMobile ? '20px' : '18px',
+            cursor: 'pointer', lineHeight: 1, transition: 'background 0.12s',
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = 'var(--hover-bg)'}
+          onMouseLeave={e => e.currentTarget.style.background = 'none'}
+        >
+          {isMobile ? '✕' : '«'}
+        </button>
       </div>
 
-      {/* ── new chat button ── */}
-      <div style={{ padding: '0 12px 16px' }}>
+      {/* ── primary nav (New chat · Tools & Jobs · Theme) ── */}
+      <div style={{ padding: '0 10px 14px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+        {/* New chat — prominent */}
         <button
           onClick={onNewChat}
           style={{
             width: '100%',
-            display: 'flex', alignItems: 'center', gap: '8px',
-            padding: '10px 14px',
-            background: '#ffffff',
+            display: 'flex', alignItems: 'center', gap: '11px',
+            padding: '10px 12px', minHeight: '44px',
+            background: 'var(--bg-elevated)',
             border: '1px solid var(--border)',
             borderRadius: 'var(--radius-md)',
             color: 'var(--text-primary)',
-            fontSize: '14px', fontWeight: '500',
+            fontSize: '14px', fontWeight: '600',
             cursor: 'pointer', fontFamily: 'var(--font)',
-            transition: 'background 0.15s',
+            marginBottom: '4px', transition: 'background 0.15s',
           }}
           onMouseEnter={e => e.currentTarget.style.background = 'var(--hover-bg)'}
-          onMouseLeave={e => e.currentTarget.style.background = '#ffffff'}
+          onMouseLeave={e => e.currentTarget.style.background = 'var(--bg-elevated)'}
         >
-          <span style={{ fontSize: '18px', lineHeight: 1, color: 'var(--text-secondary)' }}>+</span>
+          <span style={{ fontSize: '17px', width: '18px', textAlign: 'center', lineHeight: 1, color: 'var(--text-secondary)' }}>✎</span>
           New chat
         </button>
+
+        {/* Tools & Jobs — manual tool launcher + running jobs */}
+        <NavRow
+          icon="🛠"
+          label="Tools & Jobs"
+          onClick={onOpenTools}
+          disabled={!hasSession}
+          title={hasSession ? 'Run a tool · view running jobs' : 'Start a chat to run tools'}
+        />
+
+        {/* Theme */}
+        <NavRow
+          icon={theme === 'dark' ? '☀' : '🌙'}
+          label={theme === 'dark' ? 'Light mode' : 'Dark mode'}
+          onClick={onToggleTheme}
+          title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+        />
       </div>
 
-      {/* ── recent chats label ── */}
+      {/* ── recents label ── */}
       <div style={{
         padding: '0 20px 8px',
         fontSize: '11px', fontWeight: '600',
         color: 'var(--text-muted)', letterSpacing: '0.06em',
         textTransform: 'uppercase',
       }}>
-        Recent chats
+        Recents
       </div>
 
       {/* ── session list ── */}
@@ -161,7 +237,7 @@ export default function Sidebar({ activeSessionId, onSelectSession, onNewChat, u
                 style={{
                   padding: '9px 12px',
                   borderRadius: 'var(--radius-sm)',
-                  background: isActive ? '#ffffff' : 'transparent',
+                  background: isActive ? 'var(--bg-elevated)' : 'transparent',
                   border: isActive
                     ? '1px solid var(--border)'
                     : '1px solid transparent',
@@ -224,7 +300,7 @@ export default function Sidebar({ activeSessionId, onSelectSession, onNewChat, u
                   ref={menuRef}
                   style={{
                     position: 'absolute', right: 0, top: '100%',
-                    background: '#ffffff',
+                    background: 'var(--bg-elevated)',
                     border: '1px solid var(--border)',
                     borderRadius: 'var(--radius-md)',
                     padding: '4px',
@@ -300,7 +376,7 @@ export default function Sidebar({ activeSessionId, onSelectSession, onNewChat, u
         {profileOpen && (
           <div style={{
             position: 'absolute', bottom: 'calc(100% - 4px)', left: '12px', right: '12px',
-            background: '#ffffff', border: '1px solid var(--border)',
+            background: 'var(--bg-elevated)', border: '1px solid var(--border)',
             borderRadius: 'var(--radius-md)', padding: '4px', zIndex: 200,
             boxShadow: '0 6px 24px rgba(0,0,0,0.12)',
           }}>

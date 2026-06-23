@@ -5,21 +5,29 @@ import ToolLaunchPanel from './ToolLaunchPanel'
 
 
 export default function RightPanel({
+  className,
+  isMobile = false,
+  onClose,
+  activeTab: controlledTab,
+  onTabChange,
   sessionId,
   filePanelRefresh,
   jobRefresh,
   onRerun,
   onOpenFile,
 }) {
-  // which tab is active — 'files' or 'jobs'
-  const [activeTab, setActiveTab] = useState('files')
+  // which tab is active — 'files' or 'jobs'. Controlled by App when provided so
+  // the sidebar's "Tools & Jobs" entry can jump straight here.
+  const [internalTab, setInternalTab] = useState('files')
+  const activeTab = controlledTab ?? internalTab
+  const setActiveTab = onTabChange ?? setInternalTab
   // bumped when a tool panel launches a job, to refresh the jobs list at once
   const [nebRefresh, setNebRefresh] = useState(0)
   // bumped when the tool panel uploads a structure, to refresh the Files tab
   const [fileRefresh, setFileRefresh] = useState(0)
 
   return (
-    <div style={{
+    <div className={className} style={{
       width: 'var(--panel-width)',
       minWidth: 'var(--panel-width)',
       height: '100vh',
@@ -29,6 +37,30 @@ export default function RightPanel({
       flexDirection: 'column',
       overflow: 'hidden',
     }}>
+
+      {/* ── mobile sheet header (title + close) ── */}
+      {isMobile && (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '12px 14px', borderBottom: '1px solid var(--border)', flexShrink: 0,
+        }}>
+          <span style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>
+            Files &amp; outputs
+          </span>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              width: '40px', height: '40px', display: 'flex', alignItems: 'center',
+              justifyContent: 'center', background: 'none', border: 'none',
+              borderRadius: 'var(--radius-sm)', color: 'var(--text-secondary)',
+              fontSize: '20px', cursor: 'pointer', lineHeight: 1,
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* ── tab bar ── */}
       <div style={{
@@ -45,12 +77,12 @@ export default function RightPanel({
             onClick={() => setActiveTab(tab)}
             style={{
               flex: 1,
-              padding: '7px 0',
+              padding: isMobile ? '11px 0' : '7px 0',
               borderRadius: 'var(--radius-sm)',
               border: activeTab === tab
                 ? '1px solid var(--border)'
                 : '1px solid transparent',
-              background: activeTab === tab ? '#ffffff' : 'transparent',
+              background: activeTab === tab ? 'var(--bg-elevated)' : 'transparent',
               color: activeTab === tab
                 ? 'var(--text-primary)'
                 : 'var(--text-muted)',
@@ -61,7 +93,7 @@ export default function RightPanel({
               transition: 'all 0.15s ease',
             }}
           >
-            {tab.charAt(0).toUpperCase() + tab.slice(1)}
+            {tab === 'files' ? 'Files' : 'Tools & Jobs'}
           </button>
         ))}
       </div>

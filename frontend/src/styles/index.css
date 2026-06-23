@@ -1,9 +1,12 @@
-/* ── design tokens ── */
-:root {
+/* ── design tokens (light theme — default) ── */
+:root,
+:root[data-theme="light"] {
   --bg-page:        #fafaf8;
   --bg-chat:        #ffffff;
   --bg-sidebar:     #f7f7f5;
   --bg-panel:       #f7f7f5;
+  --bg-elevated:    #ffffff;   /* cards, buttons, composer — switches in dark */
+  --bg-input:       #fafaf8;
   --border:         #e7e5df;
   --border-light:   #eceae4;
 
@@ -15,6 +18,9 @@
   --accent-blue-dark: #1d4ed8;
   --hover-bg:       #f0ede6;
 
+  --code-bg:        #0f172a;
+  --code-fg:        #e5e7eb;
+
   --sidebar-width:  270px;
   --panel-width:    340px;
 
@@ -25,6 +31,33 @@
   --radius-md:  12px;
   --radius-lg:  16px;
   --radius-xl:  24px;
+
+  color-scheme: light;
+}
+
+/* ── dark theme overrides ── */
+:root[data-theme="dark"] {
+  --bg-page:        #161618;
+  --bg-chat:        #1c1c1f;
+  --bg-sidebar:     #161618;
+  --bg-panel:       #161618;
+  --bg-elevated:    #25262a;
+  --bg-input:       #232428;
+  --border:         #34343a;
+  --border-light:   #2a2a2f;
+
+  --text-primary:   #ededed;
+  --text-secondary: #aeaeb2;
+  --text-muted:     #7d7d85;
+
+  --accent-blue:    #1e3a5f;
+  --accent-blue-dark: #93c5fd;
+  --hover-bg:       #2a2b2f;
+
+  --code-bg:        #0b1020;
+  --code-fg:        #e5e7eb;
+
+  color-scheme: dark;
 }
 
 /* ── reset ── */
@@ -47,7 +80,19 @@ body {
   background: var(--bg-page);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* never allow a stray wide element to scroll the whole page sideways */
+  overflow-x: hidden;
+  max-width: 100vw;
+  /* avoid iOS auto-zoom + give mobile Safari a stable tap experience */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
+
+/* every element stays inside the viewport — kills horizontal overflow */
+* { min-width: 0; }
+
+/* comfortable touch targets + no tap highlight flash on mobile */
+button { -webkit-tap-highlight-color: transparent; }
 
 /* ── scrollbar ── */
 ::-webkit-scrollbar       { width: 5px; }
@@ -161,8 +206,8 @@ body {
   overflow-x: auto;
   border: 1px solid var(--border-light);
   border-radius: var(--radius-md);
-  background: #0f172a;
-  color: #e5e7eb;
+  background: var(--code-bg);
+  color: var(--code-fg);
   font-size: 13px;
   line-height: 1.6;
   white-space: pre;
@@ -181,8 +226,8 @@ body {
   padding: 0.15rem 0.35rem;
   border: 1px solid var(--border-light);
   border-radius: 6px;
-  background: #f3f4f6;
-  color: #111827;
+  background: var(--hover-bg);
+  color: var(--text-primary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   font-size: 0.9em;
   white-space: break-spaces;
@@ -193,6 +238,17 @@ body {
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+
+/* keep headings/quote/katex legible in dark mode */
+.assistant-markdown,
+.assistant-markdown h1,
+.assistant-markdown h2,
+.assistant-markdown h3,
+.assistant-markdown h4 { color: var(--text-primary); }
+.assistant-markdown .katex,
+.assistant-markdown .katex-display .katex { color: var(--text-primary); }
+.assistant-markdown th { background: var(--hover-bg); }
+.assistant-markdown .katex-display { background: var(--bg-page); }
 
 .assistant-markdown table {
   width: 100%;
@@ -243,4 +299,99 @@ body {
   min-width: max-content;
   text-align: left;
   font-size: 1.18em;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   Responsive app shell
+   Desktop  : sidebar | chat | right-panel  (flex row, inline styles win)
+   Mobile   : full-width chat; sidebar = overlay drawer; right-panel =
+              bottom sheet; file viewer = full screen.
+   `!important` is used so the mobile rules override the components'
+   inline styles, which otherwise take precedence.
+   ════════════════════════════════════════════════════════════════════ */
+
+.app-shell {
+  display: flex;
+  height: 100vh;
+  height: 100dvh;          /* mobile browser chrome-aware viewport height */
+  overflow: hidden;
+  background: var(--bg-page);
+}
+
+/* sliding drawer + sheet transitions (apply on all sizes, harmless desktop) */
+.app-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  background: rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.28s ease;
+}
+.app-backdrop.is-open { opacity: 1; pointer-events: auto; }
+
+@media (max-width: 767px) {
+  .app-shell { position: relative; }
+
+  /* ── sidebar → left overlay drawer ── */
+  .app-sidebar {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    bottom: 0 !important;
+    height: 100dvh !important;
+    width: 80vw !important;
+    max-width: 320px !important;
+    min-width: 0 !important;
+    z-index: 60;
+    transform: translateX(-100%);
+    transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.22);
+  }
+  .app-sidebar.is-open { transform: translateX(0); }
+
+  /* ── chat → full width ── */
+  .app-chat {
+    flex: 1 1 auto !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    height: 100dvh !important;
+  }
+
+  /* ── right panel → bottom sheet (slides up over the chat) ── */
+  .app-rightpanel {
+    position: fixed !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    height: 100dvh !important;
+    z-index: 70;
+    border-left: none !important;
+    transform: translateY(100%);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .app-rightpanel.is-open { transform: translateY(0); }
+
+  /* ── file viewer → full screen ── */
+  .app-fileviewer {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    height: 100dvh !important;
+    z-index: 80;
+    border-left: none !important;
+  }
+}
+
+/* tablet/desktop: the right panel & viewer never need the sheet transform */
+@media (min-width: 768px) {
+  .app-rightpanel,
+  .app-fileviewer { transform: none !important; }
 }

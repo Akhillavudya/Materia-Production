@@ -90,6 +90,15 @@ function timeGreeting() {
 }
 
 export default function Chat({
+  className,
+  isMobile = false,
+  hasSession = false,
+  showMenuButton = false,
+  onOpenSidebar,
+  onOpenFiles,
+  onOpenFile,
+  theme = 'light',
+  onToggleTheme,
   sessionId,
   userName,
   initialMessages,
@@ -494,7 +503,7 @@ export default function Chat({
   const composer = (
     <div style={{
       display: 'flex', alignItems: 'flex-end', gap: '0',
-      background: '#ffffff', border: '1px solid var(--border)',
+      background: 'var(--bg-elevated)', border: '1px solid var(--border)',
       borderRadius: 'var(--radius-xl)', padding: '10px 10px 10px 16px',
       boxShadow: '0 2px 8px rgba(0,0,0,0.06)', transition: 'border-color 0.15s, box-shadow 0.15s',
     }}
@@ -524,7 +533,8 @@ export default function Chat({
         disabled={streaming}
         style={{
           flex: 1, resize: 'none', border: 'none', outline: 'none',
-          background: 'transparent', fontSize: '15px', lineHeight: '1.5',
+          // 16px on mobile prevents iOS Safari from auto-zooming on focus
+          background: 'transparent', fontSize: isMobile ? '16px' : '15px', lineHeight: '1.5',
           color: 'var(--text-primary)', fontFamily: 'var(--font)',
           minHeight: '24px', maxHeight: '180px', overflowY: 'auto', padding: '2px 0',
         }}
@@ -552,18 +562,18 @@ export default function Chat({
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'center' }}>
       {SUGGESTIONS.map(chip => (
         <button key={chip} onClick={() => sendMessage(chip)} style={{
-          padding: '9px 16px', background: '#ffffff',
+          padding: '10px 16px', minHeight: '40px', background: 'var(--bg-elevated)',
           border: '1px solid var(--border)', borderRadius: '20px',
           fontSize: '13px', color: 'var(--text-secondary)',
           cursor: 'pointer', fontFamily: 'var(--font)', transition: 'all 0.15s',
         }}
         onMouseEnter={e => {
           e.currentTarget.style.background = 'var(--hover-bg)'
-          e.currentTarget.style.borderColor = '#d1cec7'
+          e.currentTarget.style.borderColor = 'var(--text-muted)'
           e.currentTarget.style.color = 'var(--text-primary)'
         }}
         onMouseLeave={e => {
-          e.currentTarget.style.background = '#ffffff'
+          e.currentTarget.style.background = 'var(--bg-elevated)'
           e.currentTarget.style.borderColor = 'var(--border)'
           e.currentTarget.style.color = 'var(--text-secondary)'
         }}
@@ -572,48 +582,88 @@ export default function Chat({
     </div>
   )
 
+  const iconBtnStyle = {
+    background: 'none', border: '1px solid var(--border)',
+    borderRadius: '8px', width: '40px', height: '40px',
+    cursor: 'pointer', fontSize: '16px', color: 'var(--text-secondary)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    transition: 'background 0.1s', flexShrink: 0,
+  }
+
   return (
-    <div style={{
+    <div className={className} style={{
       flex: 1,
       display: 'flex',
       flexDirection: 'column',
+      minWidth: 0,
       height: '100vh',
       overflow: 'hidden',
       background: 'var(--bg-chat)',
     }}>
 
-      {/* ── top header bar ── */}
+      {/* ── top header bar (sticky) ── */}
       <div style={{
-        padding: '14px 24px',
+        padding: isMobile ? '10px 12px' : '14px 24px',
         borderBottom: '1px solid var(--border)',
         display: 'flex', alignItems: 'center',
+        gap: '8px',
         justifyContent: 'space-between',
         flexShrink: 0,
         background: 'var(--bg-chat)',
       }}>
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: '6px',
-          fontSize: '15px', fontWeight: '500', color: 'var(--text-primary)',
-        }}>
-          Materials simulation assistant
-          <span style={{ color: 'var(--text-muted)', fontSize: '13px' }}>∨</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+          {/* hamburger — opens drawer (mobile) or re-opens a collapsed sidebar (desktop) */}
+          {showMenuButton && (
+            <button
+              onClick={onOpenSidebar}
+              aria-label="Open menu"
+              title="Open sidebar"
+              style={iconBtnStyle}
+              onMouseEnter={e => e.currentTarget.style.background = 'var(--hover-bg)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'none'}
+            >
+              ☰
+            </button>
+          )}
+          {showMenuButton && <LogoMark size={26} radius={7} />}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0,
+            fontSize: '15px', fontWeight: '500', color: 'var(--text-primary)',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {isMobile ? 'Materia' : 'Materials simulation assistant'}
+            </span>
+            {!isMobile && <span style={{ color: 'var(--text-muted)', fontSize: '13px' }}>∨</span>}
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          {['↑', '···'].map(icon => (
-            <button key={icon} style={{
-              background: 'none', border: '1px solid var(--border)',
-              borderRadius: '8px', width: '32px', height: '32px',
-              cursor: 'pointer', fontSize: '14px',
-              color: 'var(--text-muted)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              transition: 'background 0.1s',
-            }}
+
+        <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+          {/* theme toggle */}
+          <button
+            onClick={onToggleTheme}
+            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            aria-label="Toggle theme"
+            style={iconBtnStyle}
             onMouseEnter={e => e.currentTarget.style.background = 'var(--hover-bg)'}
             onMouseLeave={e => e.currentTarget.style.background = 'none'}
+          >
+            {theme === 'dark' ? '☀' : '🌙'}
+          </button>
+
+          {/* files / outputs — opens the bottom sheet (mobile only) */}
+          {isMobile && hasSession && (
+            <button
+              onClick={onOpenFiles}
+              title="Files & outputs"
+              aria-label="Files and outputs"
+              style={iconBtnStyle}
+              onMouseEnter={e => e.currentTarget.style.background = 'var(--hover-bg)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'none'}
             >
-              {icon}
+              🗂
             </button>
-          ))}
+          )}
         </div>
       </div>
 
@@ -623,14 +673,14 @@ export default function Chat({
         {/* new-chat welcome — centered greeting + composer (Claude-style) */}
         {isEmpty && (
           <div style={{
-            minHeight: '72vh', display: 'flex', flexDirection: 'column',
+            minHeight: '64vh', display: 'flex', flexDirection: 'column',
             justifyContent: 'center', alignItems: 'center',
-            maxWidth: '720px', margin: '0 auto', padding: '0 24px',
+            maxWidth: '720px', margin: '0 auto', padding: isMobile ? '0 16px' : '0 24px',
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '28px' }}>
-              <LogoMark size={36} radius={10} />
+              <LogoMark size={isMobile ? 30 : 36} radius={10} />
               <h1 style={{
-                fontSize: '30px', fontWeight: 600, color: 'var(--text-primary)',
+                fontSize: isMobile ? '23px' : '30px', fontWeight: 600, color: 'var(--text-primary)',
                 letterSpacing: '-0.02em', margin: 0,
               }}>
                 {timeGreeting()}{firstName ? `, ${firstName}` : ''}
@@ -644,7 +694,7 @@ export default function Chat({
         {/* messages */}
         <div style={{
           maxWidth: '760px', margin: '0 auto',
-          padding: '0 40px',
+          padding: isMobile ? '0 16px' : '0 40px',
           display: 'flex', flexDirection: 'column', gap: '24px',
         }}>
           {messages.map((msg, i) => {
@@ -712,6 +762,7 @@ export default function Chat({
                               label={card.label}
                               status={card.status}
                               files={card.files}
+                              onOpen={onOpenFile}
                             />
                           )}
                         </div>
@@ -731,12 +782,12 @@ export default function Chat({
                 {/* ── user message ── */}
                 {msg.role === 'user' && (
                   <div style={{
-                    maxWidth: '70%', padding: '12px 16px',
+                    maxWidth: isMobile ? '88%' : '70%', padding: '12px 16px',
                     background: 'var(--accent-blue)',
                     borderRadius: '18px 18px 4px 18px',
                     fontSize: '15px', lineHeight: '1.6',
                     color: 'var(--text-primary)',
-                    whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                    whiteSpace: 'pre-wrap', overflowWrap: 'anywhere',
                   }}>
                     {msg.content}
                   </div>
@@ -760,15 +811,20 @@ export default function Chat({
       {/* ── input area (bottom — only once a conversation is going) ── */}
       {!isEmpty && (
         <div style={{
-          padding: '16px 40px 24px', background: 'var(--bg-chat)',
+          padding: isMobile
+            ? '10px 12px calc(10px + env(safe-area-inset-bottom))'
+            : '16px 40px 24px',
+          background: 'var(--bg-chat)',
           flexShrink: 0, maxWidth: '760px', width: '100%',
           margin: '0 auto', boxSizing: 'border-box',
         }}>
           {composer}
-          <div style={{
-            textAlign: 'center', marginTop: '8px',
-            fontSize: '11px', color: 'var(--text-muted)',
-          }}>Shift + Enter for new line</div>
+          {!isMobile && (
+            <div style={{
+              textAlign: 'center', marginTop: '8px',
+              fontSize: '11px', color: 'var(--text-muted)',
+            }}>Shift + Enter for new line</div>
+          )}
         </div>
       )}
 

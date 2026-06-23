@@ -1,6 +1,6 @@
 import { downloadFile } from '../../api'
 
-export default function FileCard({ toolName, status, files }) {
+export default function FileCard({ toolName, status, files, onOpen }) {
   if (!files || files.length === 0) return null
 
   const ok = status === 'success'
@@ -9,7 +9,7 @@ export default function FileCard({ toolName, status, files }) {
     <div
       style={{
         marginTop: '12px',
-        background: '#ffffff',
+        background: 'var(--bg-elevated)',
         border: '1px solid var(--border-light, #eceae4)',
         borderRadius: '14px',
         padding: '14px 16px',
@@ -78,7 +78,11 @@ export default function FileCard({ toolName, status, files }) {
             📄
           </div>
 
-          <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{ flex: 1, minWidth: 0, cursor: onOpen ? 'pointer' : 'default' }}
+            onClick={() => onOpen?.(file.rel_path, file.name)}
+            title={onOpen ? `Open ${file.name}` : file.name}
+          >
             <div
               style={{
                 fontSize: '13px',
@@ -87,6 +91,9 @@ export default function FileCard({ toolName, status, files }) {
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
+                textDecoration: onOpen ? 'underline' : 'none',
+                textUnderlineOffset: '2px',
+                textDecorationColor: 'var(--border)',
               }}
             >
               {file.name}
