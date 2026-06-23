@@ -102,8 +102,13 @@ class OptimizeStructureInput(BaseModel):
 class RunMdSimulationInput(BaseModel):
     poscar_name: Optional[str] = Field(
         None, description="input file (auto-detects CONTCAR/POSCAR if omitted)")
-    ensemble: str = Field("nvt", description='"nvt" | "npt"')
-    temperature: float = Field(300.0, description="target temperature [K]")
+    ensemble: str = Field(
+        "nvt",
+        description='"nvt" (const T) | "npt" (const T,P) | "nve" (microcanonical, '
+                    'no thermostat — judged by energy conservation)')
+    temperature: float = Field(
+        300.0,
+        description="target temperature [K] (for NVE: seeds the initial velocities)")
     nsw: int = Field(2000, ge=1, le=settings.max_md_steps,
                      description="total MD steps (CPU-bound: each step is one "
                                  "force eval, ~hundreds of ms; only go above a "
@@ -133,6 +138,11 @@ class ComputeElasticInput(BaseModel):
     max_steps: int = Field(
         300, ge=1, le=settings.max_opt_steps,
         description="max optimizer steps per relaxation")
+    relax_mode: str = Field(
+        "full",
+        description='pre-strain relaxation: "positions" (ions only) | "shape" '
+                    '(cell shape + ions, fixed volume) | "full" (shape + volume + '
+                    'ions, default & recommended for elastic constants)')
     calculator_type: str = Field("mace", description=_CALC_TYPE_DESC)
     calculator_model: Optional[str] = Field(None, description=_CALC_MODEL_DESC)
     emit_vasp_inputs: bool = Field(
@@ -164,9 +174,21 @@ class ComputeNebInput(BaseModel):
     poscar_name: Optional[str] = Field(
         None, description="INITIAL-state structure in the session (auto-detects "
                           "POSCAR if omitted)")
-    final_poscar_name: str = Field(
-        ..., description="FINAL-state structure file in the session (the end point "
-                         "of the hop/migration). Required — NEB needs both states.")
+    final_poscar_name: Optional[str] = Field(
+        None, description="FINAL-state structure file in the session (the end point "
+                          "of the hop). Provide this OR migrating_element.")
+    migrating_element: Optional[str] = Field(
+        None, description='migrating atom, e.g. "Mg" — auto-builds the vacancy-'
+                          'mediated initial/final endpoints instead of needing a '
+                          'final file. Use list_migration_paths to pick a hop.')
+    source_site: Optional[int] = Field(
+        None, description="source site label (1..N from list_migration_paths); "
+                          "defaults to the shortest candidate hop")
+    dest_site: Optional[int] = Field(
+        None, description="destination site label (1..N); defaults with source_site "
+                          "to the shortest candidate hop")
+    symprec: float = Field(
+        0.1, description="symmetry tolerance (Å) for finding distinct migrating sites")
     n_images: int = Field(
         7, ge=3, le=15,
         description="number of interior images between the two endpoints "
@@ -187,6 +209,23 @@ class ComputeNebInput(BaseModel):
     optimizer: str = Field("FIRE", description='"FIRE" | "BFGS" | "LBFGS"')
     calculator_type: str = Field("mace", description=_CALC_TYPE_DESC)
     calculator_model: Optional[str] = Field(None, description=_CALC_MODEL_DESC)
+
+
+# ── list_migration_paths (NEB hop preview) ───────────────────────────────────
+
+class ListMigrationPathsInput(BaseModel):
+    element: str = Field(
+        ..., description='migrating element to analyse, e.g. "Mg" or "Li"')
+    cutoff: float = Field(
+        5.0, description="max hop distance in Å to list (shorter hops first)")
+    poscar_name: Optional[str] = Field(
+        None, description="session structure to analyse (defaults to active POSCAR)")
+    material_id: Optional[str] = Field(
+        None, description="optional: analyse a database structure instead")
+    source: Optional[str] = Field(
+        None, description='"mp" | "c2db" | "oqmd" (paired with material_id)')
+    symprec: float = Field(
+        0.1, description="symmetry tolerance (Å) for finding distinct sites")
 
 
 # ── 5.7 generate_sqs ──────────────────────────────────────────────────────────

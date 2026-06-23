@@ -22,6 +22,7 @@ from app.tools.contracts import (
     GenerateSqsInput,
     GenerateVaspInputsInput,
     ListFilesInput,
+    ListMigrationPathsInput,
     ListModelsInput,
     MakeSlabInput,
     MakeSupercellInput,
@@ -56,6 +57,7 @@ _TOOL_SPECS = [
     ("compute_phonons",       "Computing phonons",            ComputePhononInput),
     ("generate_sqs",          "Generating SQS (ATAT mcsqs)",  GenerateSqsInput),
     ("compute_neb",           "Computing NEB pathway",        ComputeNebInput),
+    ("list_migration_paths",  "Listing NEB migration hops",   ListMigrationPathsInput),
 ]
 
 

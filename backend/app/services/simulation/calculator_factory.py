@@ -155,17 +155,37 @@ def get_calculator(config: Optional[dict] = None):
         )
 
 
+def _has_checkpoint(model_dir: Path, suffixes: list[str]) -> bool:
+    """True only if a usable checkpoint FILE exists (not just the directory).
+
+    An empty model directory used to report as available and then fail at load
+    time — this checks for an actual ``.model``/``.pth``/… file inside.
+    """
+    if model_dir.is_file():
+        return True
+    if not model_dir.is_dir():
+        return False
+    return any(next(model_dir.rglob(f"*{suffix}"), None) is not None
+               for suffix in suffixes)
+
+
 def list_available_models() -> dict:
-    """Return all model names grouped by type, with existence check."""
+    """Return all model names grouped by type, with a real availability check.
+
+    ``exists`` is True only when a loadable checkpoint file is present, so the UI
+    and the agent never advertise an empty/broken model directory.
+    """
     result = {"mace": [], "mattersim": []}
 
     for name, rel in _MACE_MODEL_PATHS.items():
         p = _DEFAULT_MODELS_ROOT / rel
-        result["mace"].append({"name": name, "exists": p.exists(), "path": str(p)})
+        ok = _has_checkpoint(p, [".model", ".pt", ".ckpt"])
+        result["mace"].append({"name": name, "exists": ok, "path": str(p)})
 
     for name, rel in _MATTERSIM_MODEL_PATHS.items():
         p = _DEFAULT_MODELS_ROOT / rel
-        result["mattersim"].append({"name": name, "exists": p.exists(), "path": str(p)})
+        ok = _has_checkpoint(p, [".pth", ".pt", ".ckpt"])
+        result["mattersim"].append({"name": name, "exists": ok, "path": str(p)})
 
     return result
 

@@ -46,6 +46,7 @@ import time
 from pathlib import Path
 from typing import Callable, Optional
 
+from app.core.config import settings
 from app.domain.jobs import JobCancelled
 from app.services.simulation.calculator_factory import get_calculator
 from app.services.vasp.incar import generate_incar
@@ -167,7 +168,8 @@ def run_optimization(
         # Report progress (and let the callback raise JobCancelled to stop early).
         if progress_callback is not None:
             progress_callback(step=step, energy=round(e, 6), fmax=round(fmax_now, 6),
-                              total=max_steps)
+                              total=max_steps, phase="Relax structure",
+                              phase_index=1, phase_count=1)
 
     opt.attach(_record, interval=1)
 
@@ -257,6 +259,41 @@ def run_optimization(
     except Exception:
         results_path = None
 
+    # ── 13c. Convergence report (steps / converged / needs-more-steps) ────────
+    report_files: dict = {}
+    try:
+        from app.services.simulation.report import ConvergenceReport, write_report
+        energies_only = [r["energy_eV"] for r in energy_log]
+        report = ConvergenceReport(
+            tool="optimize_structure",
+            title="Geometry optimization",
+            formula=formula, calculator=calc_cfg, elapsed_s=elapsed,
+        )
+        report.add_phase(
+            "Relax structure",
+            step_budget=max_steps, steps_taken=steps,
+            converged=bool(converged), final_fmax=final_fmax, fmax_target=fmax,
+            energy_start=energies_only[0] if energies_only else None,
+            energy_end=final_energy,
+        )
+        report.summary = {
+            "Final energy (eV)": final_energy,
+            "Max force (eV/Å)": final_fmax,
+            "Force target (eV/Å)": fmax,
+            "Cell relax": cell_relax,
+        }
+        if converged:
+            report.verdict_lines = [
+                f"Converged in {steps} steps (max force {final_fmax} ≤ {fmax} eV/Å)."]
+        elif not cancelled:
+            report.verdict_lines = [
+                f"Did NOT converge in {steps}/{max_steps} steps (max force "
+                f"{final_fmax} > {fmax} eV/Å) — rerun with max_steps = "
+                f"{min(max_steps * 2, settings.max_opt_steps)} to converge the energy."]
+        report_files = write_report(str(out_dir), report)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[Optimization] report generation warning: {exc}")
+
     if cancelled:
         status = "cancelled"
     else:
@@ -296,6 +333,7 @@ def run_optimization(
             "results_json":     str(results_path) if results_path else None,
             "incar":            str(incar_path)  if incar_path  else None,
             "kpoints":          str(kpoints_path) if kpoints_path else None,
+            **report_files,
         },
     }
 

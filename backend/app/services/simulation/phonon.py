@@ -106,7 +106,9 @@ def run_phonon(
             atoms.calc = calc
             forces.append(atoms.get_forces())
             if progress_callback is not None:
-                progress_callback(step=i, total=n_disp)   # raises if cancelled
+                progress_callback(step=i, total=n_disp,   # raises if cancelled
+                                  phase="Forces on displaced supercells",
+                                  phase_index=1, phase_count=1)
     except JobCancelled:
         return {"status": "cancelled",
                 "message": "Phonon calculation was cancelled before completion."}
@@ -133,6 +135,40 @@ def run_phonon(
 
     # ── 6. Artifacts ──────────────────────────────────────────────────────────
     files = _write_outputs(out_dir, phonon, band_dict, dos_dict, np)
+
+    # ── 6b. Convergence / stability report ────────────────────────────────────
+    try:
+        from app.services.simulation.report import ConvergenceReport, write_report
+        report = ConvergenceReport(
+            tool="compute_phonons",
+            title="Phonon band structure + DOS",
+            formula=formula, calculator=calc_cfg, elapsed_s=elapsed,
+        )
+        report.add_phase(
+            "Forces on displaced supercells",
+            step_budget=n_disp, steps_taken=n_disp, converged=True,
+            notes=[f"{n_disp} finite displacements on a {nx}×{ny}×{nz} supercell "
+                   f"({n_sc_atoms} atoms)."],
+        )
+        report.summary = {
+            "Supercell": f"{nx}×{ny}×{nz}",
+            "Min frequency (THz)": round(min_freq, 4),
+            "Imaginary modes": has_imaginary,
+        }
+        if has_imaginary:
+            report.verdict_lines = [
+                f"Minimum frequency {min_freq:.3f} THz is imaginary — the structure "
+                f"is DYNAMICALLY UNSTABLE at this supercell. Re-relax tightly "
+                f"(optimize_structure with a small fmax) and/or try a larger "
+                f"supercell before concluding instability."]
+        else:
+            report.verdict_lines = [
+                f"Minimum frequency {min_freq:.3f} THz ≥ 0 — the structure is "
+                f"dynamically stable. For publication accuracy, confirm with a "
+                f"larger supercell."]
+        files.update(write_report(str(out_dir), report))
+    except Exception as exc:  # noqa: BLE001
+        print(f"[Phonon] report generation warning: {exc}")
 
     message = (
         f"Phonons for {formula} ({nx}×{ny}×{nz} supercell, {n_sc_atoms} atoms, "

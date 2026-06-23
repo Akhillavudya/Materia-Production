@@ -137,6 +137,21 @@ def run_md(
     timestep_ase = timestep * units.fs          # fs → ASE time units
     temperature_K = float(temperature)
     friction_ase  = friction / units.fs         # ps^-1 → ASE units
+    ensemble_l    = ensemble.lower()
+
+    # ── 3b. Initialise velocities ─────────────────────────────────────────────
+    # Required for NVE (VelocityVerlet has no thermostat to inject kinetic energy —
+    # without this the atoms start frozen and nothing happens). Harmless for NVT/NPT
+    # too: it seeds a sensible Maxwell-Boltzmann distribution at the target T and
+    # removes any net translation/rotation so the cell doesn't drift.
+    try:
+        from ase.md.velocitydistribution import (
+            MaxwellBoltzmannDistribution, Stationary, ZeroRotation)
+        MaxwellBoltzmannDistribution(atoms, temperature_K=temperature_K)
+        Stationary(atoms)        # zero net momentum
+        ZeroRotation(atoms)      # zero net angular momentum
+    except Exception as e:  # noqa: BLE001 — non-fatal; thermostats still drive NVT/NPT
+        print(f"[MD] velocity init warning: {e}")
 
     # ── 4. Build thermostat/dynamics object ───────────────────────────────────
     traj_path = out_dir / "trajectory.traj"
@@ -176,7 +191,9 @@ def run_md(
         # Report progress (callback may raise JobCancelled to stop the run early).
         if progress_callback is not None:
             progress_callback(step=step, energy=round(e, 6),
-                              temperature=round(T, 3), total=nsw)
+                              temperature=round(T, 3), total=nsw,
+                              phase=f"MD ({ensemble.upper()})",
+                              phase_index=1, phase_count=1)
 
     dyn.attach(_log_step, interval=log_interval)
 
@@ -238,7 +255,8 @@ def run_md(
         try:
             from pymatgen.io.ase import AseAtomsAdaptor
             structure    = AseAtomsAdaptor.get_structure(atoms)
-            task_key     = "md_nvt" if ensemble.lower() == "nvt" else "md_npt"
+            task_key     = {"nvt": "md_nvt", "npt": "md_npt",
+                            "nve": "md_nve"}.get(ensemble_l, "md_nvt")
             incar_str    = generate_incar(
                 structure, task=task_key,
                 temperature=int(temperature), nsw=nsw, timestep=timestep
@@ -301,6 +319,50 @@ def run_md(
     except Exception:  # noqa: BLE001
         results_path = None
 
+    # ── 11c. Convergence / stability report ───────────────────────────────────
+    report_files: dict = {}
+    try:
+        from app.services.simulation.report import ConvergenceReport, write_report
+        report = ConvergenceReport(
+            tool="run_md_simulation",
+            title=f"Molecular dynamics ({ensemble.upper()})",
+            formula=formula, calculator=calc_cfg, elapsed_s=elapsed,
+        )
+        report.add_phase(
+            f"MD ({ensemble.upper()})",
+            step_budget=nsw, steps_taken=steps_done,
+            converged=None,
+            energy_start=energies[0] if energies else None,
+            energy_end=final_E,
+        )
+        report.summary = {
+            "Ensemble": ensemble.upper(),
+            "Mean temperature (K)": round(mean_T, 1) if mean_T is not None else None,
+            "Temperature std (K)": round(T_std, 1),
+            "Energy drift/atom (eV)": drift_per_atom,
+            "Final energy (eV)": final_E,
+        }
+        # Verdict — for NVE the signal is energy conservation; for NVT/NPT it's
+        # temperature control. drift/atom near zero = a healthy run.
+        verdict: list[str] = []
+        if drift_per_atom is not None:
+            if abs(drift_per_atom) <= 1e-3:
+                verdict.append(
+                    f"Energy is well conserved (drift {drift_per_atom:+g} eV/atom) — "
+                    f"the dynamics are stable.")
+            else:
+                verdict.append(
+                    f"Energy drifted by {drift_per_atom:+g} eV/atom — consider a "
+                    f"smaller timestep (now {timestep} fs) or check the structure.")
+        if ensemble_l != "nve" and mean_T is not None:
+            verdict.append(
+                f"Mean temperature {mean_T:.1f} K vs target {temperature_K:.0f} K "
+                f"(±{T_std:.1f} K).")
+        report.verdict_lines = verdict
+        report_files = write_report(str(out_dir), report)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[MD] report generation warning: {exc}")
+
     verb = "was cancelled after" if cancelled else "completed"
     drift_str = (f", E drift/atom = {drift_per_atom:+g} eV" if drift_per_atom is not None else "")
     message = (
@@ -337,6 +399,7 @@ def run_md(
             "contcar":         str(contcar_path),
             "incar":           str(incar_path)        if incar_path        else None,
             "kpoints":         str(kpoints_path)      if kpoints_path      else None,
+            **report_files,
         },
     }
 
@@ -358,6 +421,13 @@ def _make_dynamics(
     from ase import units
 
     traj_kwargs = {"trajectory": traj_path, "logfile": log_path}
+
+    if ensemble == "nve":
+        # Microcanonical: constant Number, Volume, Energy. No thermostat — pure
+        # Newtonian dynamics. Velocities are seeded by the Maxwell-Boltzmann init
+        # in run_md(); the run's quality is judged by energy conservation (drift).
+        from ase.md.verlet import VelocityVerlet
+        return VelocityVerlet(atoms, timestep=timestep, **traj_kwargs)
 
     if ensemble == "nvt":
         if thermostat in ("langevin", ""):

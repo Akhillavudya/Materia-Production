@@ -14,6 +14,20 @@ logger = get_logger(__name__)
 C2DB_DB = os.environ.get("C2DB_DB", "/data/c2db/c2db.db")
 
 
+def _formula_elements(formula: str) -> set[str]:
+    """Element symbols present in a formula string (e.g. 'MoS2' → {'Mo', 'S'}).
+
+    Uses pymatgen Composition for correctness, with a regex fallback so a single
+    odd formula never breaks the whole search.
+    """
+    try:
+        from pymatgen.core import Composition
+        return {el.symbol for el in Composition(formula).elements}
+    except Exception:  # noqa: BLE001
+        import re
+        return set(re.findall(r"[A-Z][a-z]?", formula or ""))
+
+
 class C2DBProvider:
     source = Source.C2DB
 
@@ -31,9 +45,13 @@ class C2DBProvider:
             kv = row.key_value_pairs or {}
             formula_db = row.formula
 
-            if query.element and query.element not in formula_db:
+            # Element membership must be by actual chemical element, NOT substring —
+            # a substring test wrongly matches "S" inside "Se" (or "Sc" inside a
+            # formula that only contains Se). Parse the formula into element symbols.
+            elem_set = _formula_elements(formula_db)
+            if query.element and query.element not in elem_set:
                 continue
-            if query.elements and not all(e in formula_db for e in query.elements):
+            if query.elements and not all(e in elem_set for e in query.elements):
                 continue
 
             gap = kv.get("gap")

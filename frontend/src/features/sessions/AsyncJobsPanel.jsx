@@ -107,6 +107,11 @@ export default function AsyncJobsPanel({ sessionId, refreshSignal }) {
 
             {job.status === 'running' && (
               <>
+                {p.phase ? (
+                  <div style={{ marginTop: 5, fontSize: 11, fontWeight: 500, color: 'var(--text-secondary)' }}>
+                    {p.phase_index && p.phase_count ? `Phase ${p.phase_index}/${p.phase_count}: ` : ''}{p.phase}
+                  </div>
+                ) : null}
                 <ProgressBar pct={p.pct} />
                 <div style={{ marginTop: 5, fontSize: 10, color: 'var(--text-muted)', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                   {p.total ? <span>step {p.step}/{p.total}{p.pct != null ? ` · ${p.pct}%` : ''}</span> : null}

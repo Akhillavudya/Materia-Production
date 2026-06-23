@@ -138,6 +138,17 @@ _INCAR_TASKS: dict[str, dict] = {
         "LSCALU":   ".FALSE.",
         "LPLANE":   ".FALSE.",
     },
+    "md_nve": {
+        "IBRION":   0,
+        "MDALGO":   0,          # NVE — standard velocity-Verlet, no thermostat
+        "NSW":      10000,
+        "POTIM":    1.0,        # timestep [fs]
+        "TEBEG":    300,        # only seeds the initial velocity distribution
+        "SMASS":    -3,         # -3 = microcanonical (NVE) in VASP
+        "ISIF":     2,
+        "LSCALU":   ".FALSE.",
+        "LPLANE":   ".FALSE.",
+    },
     "md_npt": {
         "IBRION":   0,
         "MDALGO":   3,          # NPT Langevin

@@ -62,6 +62,7 @@ def run_elastic(
     max_steps:            int            = 300,
     calculator:           Optional[dict] = None,
     symprec:              float          = 0.01,
+    relax_mode:           str            = "full",
     generate_vasp_inputs: bool           = True,
     progress_callback:    Optional[Callable[..., None]] = None,
 ) -> dict:
@@ -100,11 +101,13 @@ def run_elastic(
     modes = _MODES_2D if is_2d else _MODES_3D
     n_phases = 1 + len(modes) * len(strain_values)   # cell relax + strained runs
     phase = [0]   # mutable counter shared with the progress helper
+    label = ["Relax cell"]   # mutable current-phase label
 
     def _bump():
         phase[0] += 1
         if progress_callback is not None:
-            progress_callback(step=phase[0], total=n_phases)   # raises if cancelled
+            progress_callback(step=phase[0], total=n_phases, phase=label[0],
+                              phase_index=phase[0], phase_count=n_phases)
 
     try:
         calc_cfg = calculator or {"type": "mace"}
@@ -117,13 +120,28 @@ def run_elastic(
     spg_symbol, spg_number = "P1", 1
 
     try:
-        # ── 2. Relax the cell (in-plane only for 2D) ──────────────────────────
+        # ── 2. Relax the structure before straining ───────────────────────────
+        # relax_mode picks what is allowed to move (the tester's three options):
+        #   "positions" — ions only (cell fixed)
+        #   "shape"     — cell shape + ions, volume fixed
+        #   "full"      — cell shape + volume + ions (default; best for elastic)
+        rmode = (relax_mode or "full").lower().strip()
         relax_atoms = AseAtomsAdaptor.get_atoms(structure0)
         relax_atoms.calc = calc
-        cell_filter = FrechetCellFilter(relax_atoms, mask=_cell_mask(is_2d, vacuum_axis))
-        opt = FIRE(cell_filter, logfile=str(out_dir / "cell_relax.log"))
-        _attach_cancel(opt, progress_callback, phase, n_phases)
-        opt.run(fmax=fmax, steps=max_steps)
+        if rmode == "positions":
+            opt_target = relax_atoms
+        elif rmode == "shape":
+            opt_target = FrechetCellFilter(
+                relax_atoms, mask=_cell_mask(is_2d, vacuum_axis),
+                constant_volume=True)
+        else:  # "full"
+            opt_target = FrechetCellFilter(
+                relax_atoms, mask=_cell_mask(is_2d, vacuum_axis))
+        label[0] = f"Relax cell ({rmode})"
+        opt = FIRE(opt_target, logfile=str(out_dir / "cell_relax.log"))
+        _attach_cancel(opt, progress_callback, phase, n_phases, label)
+        cell_converged = bool(opt.run(fmax=fmax, steps=max_steps))
+        cell_steps = int(opt.nsteps)
         _bump()
 
         relaxed = AseAtomsAdaptor.get_structure(relax_atoms)
@@ -144,14 +162,17 @@ def run_elastic(
 
         # ── 5. Strain → stress for every mode/amplitude ───────────────────────
         rows = []   # (mode, strain, sxx, syy, szz, syz, sxz, sxy)
+        strain_unconverged = 0
         for mode in modes:
             for eps in strain_values:
                 strained = _apply_strain(reference, mode, eps, np, Lattice)
                 s_atoms = AseAtomsAdaptor.get_atoms(strained)
                 s_atoms.calc = calc
                 ion_opt = BFGS(s_atoms, logfile=None)
-                _attach_cancel(ion_opt, progress_callback, phase, n_phases)
-                ion_opt.run(fmax=fmax, steps=max_steps)
+                label[0] = f"Strain {mode} {eps:+.3f} (ion relax)"
+                _attach_cancel(ion_opt, progress_callback, phase, n_phases, label)
+                if not bool(ion_opt.run(fmax=fmax, steps=max_steps)):
+                    strain_unconverged += 1
                 stress = s_atoms.get_stress(voigt=True) / GPa - stress0
                 rows.append([mode, float(eps), *[float(x) for x in stress]])
                 _bump()
@@ -180,6 +201,52 @@ def run_elastic(
         out_dir, reference, C, rows, props, write,
         AseAtomsAdaptor, generate_vasp_inputs,
     )
+
+    # ── 8b. Convergence report ────────────────────────────────────────────────
+    try:
+        from app.services.simulation.report import ConvergenceReport, write_report
+        report = ConvergenceReport(
+            tool="compute_elastic_tensor",
+            title="Elastic / mechanical properties",
+            formula=formula, calculator=calc_cfg, elapsed_s=elapsed,
+        )
+        report.add_phase(
+            f"Relax cell ({rmode})",
+            step_budget=max_steps, steps_taken=cell_steps,
+            converged=cell_converged, fmax_target=fmax,
+        )
+        report.add_phase(
+            f"Strained ion relaxations ({len(modes) * len(strain_values)} runs)",
+            converged=(strain_unconverged == 0),
+            notes=([f"{strain_unconverged} strained relaxation(s) hit max_steps "
+                    f"without converging — the tensor may be noisy; increase "
+                    f"max_steps."] if strain_unconverged else []),
+        )
+        stable = props.get("mechanically_stable")
+        report.summary = {
+            "Dimensionality": "2D" if is_2d else "3D",
+            "Relax mode": rmode,
+            "Mechanically stable (Born)": stable,
+        }
+        verdict = []
+        if not cell_converged:
+            verdict.append(
+                f"The cell relaxation did NOT converge in {cell_steps}/{max_steps} "
+                f"steps — rerun with a larger max_steps before trusting the moduli.")
+        if strain_unconverged:
+            verdict.append(
+                f"{strain_unconverged} strained relaxation(s) did not converge — "
+                f"the elastic constants may be unreliable.")
+        if stable is False:
+            verdict.append("Born stability criteria are NOT satisfied — the "
+                           "structure may be mechanically unstable (or unconverged).")
+        if not verdict:
+            verdict.append("Cell + all strained relaxations converged; elastic "
+                           "tensor is well defined.")
+        report.verdict_lines = verdict
+        files.update(write_report(str(out_dir), report))
+    except Exception as exc:  # noqa: BLE001
+        print(f"[Elastic] report generation warning: {exc}")
 
     summary = {
         "status":         "success",
@@ -262,13 +329,15 @@ def _fit_tensor(rows, np):
     return 0.5 * (C + C.T)   # symmetrise
 
 
-def _attach_cancel(opt, progress_callback, phase, n_phases):
+def _attach_cancel(opt, progress_callback, phase, n_phases, label=None):
     """Make an inner optimizer cancellable: each step checks the job status."""
     if progress_callback is None:
         return
 
     def _check():
-        progress_callback(step=phase[0], total=n_phases)   # raises if cancelled
+        progress_callback(step=phase[0], total=n_phases,   # raises if cancelled
+                          phase=(label[0] if label else None),
+                          phase_index=phase[0] + 1, phase_count=n_phases)
 
     opt.attach(_check, interval=1)
 

@@ -1414,6 +1414,7 @@ def compute_elastic_tensor(
     source:           Optional[str] = None,
     fmax:             float         = 0.01,
     max_steps:        int           = 300,
+    relax_mode:       str           = "full",
     calculator_type:  str           = "mace",
     calculator_model: Optional[str] = None,
     emit_vasp_inputs: bool          = True,
@@ -1426,6 +1427,9 @@ def compute_elastic_tensor(
     """
     fmax      = max(float(fmax), 0.001)
     max_steps = min(max(int(max_steps), 1), settings.max_opt_steps)
+    relax_mode = (relax_mode or "full").lower().strip()
+    if relax_mode not in ("positions", "shape", "full"):
+        relax_mode = "full"
 
     # Optionally materialize a database structure as the active POSCAR first.
     if material_id:
@@ -1452,7 +1456,7 @@ def compute_elastic_tensor(
         JobType.ELASTIC,
         poscar_path=poscar_path,
         output_dir=session_path() / "elastic",
-        params={"fmax": fmax, "max_steps": max_steps},
+        params={"fmax": fmax, "max_steps": max_steps, "relax_mode": relax_mode},
         calculator=calc_cfg,
         emit_vasp_inputs=emit_vasp_inputs,
     )
@@ -1639,9 +1643,94 @@ def generate_sqs(
 # TOOL — compute_neb  (NEB migration barrier; ML potential)
 # ─────────────────────────────────────────────────────────────────────────────
 
+def list_migration_paths(
+    element:      str,
+    cutoff:       float         = 5.0,
+    poscar_name:  Optional[str] = None,
+    material_id:  Optional[str] = None,
+    source:       Optional[str] = None,
+    symprec:      float         = 0.1,
+) -> dict:
+    """List candidate NEB migration hops for a migrating element (no job).
+
+    Finds the symmetry-distinct sites of ``element`` (labelled 1..N) and returns
+    every source→destination pair within ``cutoff`` Å, sorted shortest-first — so
+    the user can pick a hop (e.g. "1-5") before launching a long NEB.
+    """
+    from app.services.simulation import neb_path
+
+    if material_id:
+        try:
+            structure = _resolve_structure(material_id, source, None)
+            write_poscar(structure, session_dir(),
+                         name=structure.composition.reduced_formula)
+        except _StructureError as e:
+            return {"status": "error", "message": str(e)}
+
+    try:
+        path = find_structure_in_session(poscar_name, prefer_contcar=False)
+    except FileNotFoundError as e:
+        return {"status": "error", "message": str(e)}
+
+    try:
+        sites = neb_path.find_migration_sites(path, element, symprec=symprec)
+        pairs = neb_path.list_migration_pairs(path, element, cutoff=cutoff,
+                                              symprec=symprec)
+    except Exception as e:  # noqa: BLE001
+        return {"status": "error", "message": f"Migration-site analysis failed: {e}"}
+
+    if not sites:
+        return {"status": "error",
+                "message": f"No {element} atoms found in the structure."}
+
+    return {
+        "status": "success",
+        "element": element,
+        "n_sites": len(sites),
+        "sites": [{"label": s.label, "frac_coords": list(s.frac_coords),
+                   "orbit": s.orbit} for s in sites],
+        "pairs": neb_path.pairs_to_rows(pairs),
+        "message": (
+            f"{element}: {len(sites)} symmetry-distinct site(s); "
+            f"{len(pairs)} candidate hop(s) within {cutoff} Å. "
+            f"Pick a pair (e.g. source_site/dest_site) for compute_neb."),
+    }
+
+
+def _build_neb_endpoints(initial_path, element, source_site, dest_site, symprec):
+    """Build + write initial/final endpoint POSCARs for a migrating-atom hop.
+
+    Returns ``(initial_path, final_path, info)`` or raises ValueError. The chosen
+    hop defaults to the shortest candidate pair when source/dest are not given.
+    """
+    from app.services.simulation import neb_path
+
+    pairs = neb_path.list_migration_pairs(initial_path, element, cutoff=0.0,
+                                          symprec=symprec)
+    if source_site is None or dest_site is None:
+        if not pairs:
+            raise ValueError(f"No {element} site pairs found to build a hop.")
+        chosen = pairs[0]                       # shortest hop
+        source_site = source_site or chosen.source_label
+        dest_site = dest_site or chosen.dest_label
+
+    initial, final = neb_path.build_migration_endpoints(
+        initial_path, element, int(source_site), int(dest_site), symprec=symprec)
+
+    tag = f"{element}_{source_site}-{dest_site}"
+    init_res = write_poscar(initial, session_dir(), name="NEB_initial", tag=tag)
+    final_res = write_poscar(final, session_dir(), name="NEB_final", tag=tag)
+    info = {"migrating_element": element, "source_site": int(source_site),
+            "dest_site": int(dest_site)}
+    return Path(init_res["named_path"]), Path(final_res["named_path"]), info
+
+
 def compute_neb(
     poscar_name:       Optional[str] = None,
     final_poscar_name: Optional[str] = None,
+    migrating_element: Optional[str] = None,
+    source_site:       Optional[int] = None,
+    dest_site:         Optional[int] = None,
     n_images:          int           = 7,
     fmax:              float         = 0.05,
     max_steps:         int           = 300,
@@ -1649,21 +1738,30 @@ def compute_neb(
     climb:             bool          = True,
     relax_endpoints:   bool          = True,
     optimizer:         str           = "FIRE",
+    symprec:           float         = 0.1,
     calculator_type:   str           = "mace",
     calculator_model:  Optional[str] = None,
 ) -> dict:
-    """Queue an NEB job: find the migration barrier between two endpoint states.
+    """Queue an NEB job: find the migration barrier for an atomic hop.
 
-    Takes an INITIAL and a FINAL structure (both already in the session),
-    interpolates a band of images, and relaxes it with the ML potential to the
-    minimum-energy path — returning the forward/reverse activation barrier and a
-    path plot. Long-running, so this enqueues a job and returns a ``job_id``.
+    Two ways to specify the hop:
+      • **Two endpoints** — pass ``final_poscar_name`` (an end-state structure
+        already in the session), or
+      • **A migrating atom** — pass ``migrating_element`` (e.g. "Mg") and optionally
+        ``source_site``/``dest_site`` labels from ``list_migration_paths``; the tool
+        auto-builds the vacancy-mediated initial/final endpoints (remove the
+        destination atom; move the source atom into it).
+
+    Interpolates a band of images and relaxes it with the ML potential to the
+    minimum-energy path — returning forward/reverse barriers + a path plot +
+    a convergence report. Long-running, so this enqueues a job and returns a
+    ``job_id``.
     """
-    if not final_poscar_name:
+    if not final_poscar_name and not migrating_element:
         return {"status": "error",
-                "message": "compute_neb needs final_poscar_name — the end-state "
-                           "structure of the hop. Generate it first (e.g. move the "
-                           "migrating atom), then call NEB with both files."}
+                "message": "compute_neb needs either final_poscar_name (an end-state "
+                           "structure) OR migrating_element (e.g. 'Mg') to auto-build "
+                           "the hop. Use list_migration_paths to see candidate hops."}
 
     n_images = min(max(int(n_images), 3), 15)
     fmax = max(float(fmax), 0.001)
@@ -1674,10 +1772,25 @@ def compute_neb(
         initial_path = find_structure_in_session(poscar_name, prefer_contcar=False)
     except FileNotFoundError as e:
         return {"status": "error", "message": f"Initial structure: {e}"}
-    try:
-        final_path = find_structure_in_session(final_poscar_name, prefer_contcar=False)
-    except FileNotFoundError as e:
-        return {"status": "error", "message": f"Final structure: {e}"}
+
+    endpoint_info: Optional[dict] = None
+    if final_poscar_name:
+        try:
+            final_path = find_structure_in_session(final_poscar_name,
+                                                   prefer_contcar=False)
+        except FileNotFoundError as e:
+            return {"status": "error", "message": f"Final structure: {e}"}
+    else:
+        # Auto-build endpoints from the migrating element.
+        try:
+            initial_path, final_path, endpoint_info = _build_neb_endpoints(
+                initial_path, migrating_element.strip(),
+                source_site, dest_site, symprec)
+        except ValueError as e:
+            return {"status": "error", "message": str(e)}
+        except Exception as e:  # noqa: BLE001
+            return {"status": "error",
+                    "message": f"Failed to build NEB endpoints: {e}"}
 
     if initial_path.resolve() == final_path.resolve():
         return {"status": "error",
@@ -1723,5 +1836,10 @@ def compute_neb(
     )
     if result.get("status") == "queued":
         result["calculator"] = calc_cfg
-        result["message"] = f"{result['message']} Using {_calc_label(calc_cfg)}."
+        msg = f"{result['message']} Using {_calc_label(calc_cfg)}."
+        if endpoint_info:
+            result["endpoints"] = endpoint_info
+            msg += (f" Auto-built {endpoint_info['migrating_element']} hop "
+                    f"{endpoint_info['source_site']}→{endpoint_info['dest_site']}.")
+        result["message"] = msg
     return result

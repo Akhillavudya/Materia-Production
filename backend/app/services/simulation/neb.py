@@ -126,6 +126,11 @@ def run_neb(
     climb_used = False
     converged = False
     endpoint_converged: dict = {}
+    # Per-phase bookkeeping for the convergence report (steps taken / converged).
+    phase_stats: list[dict] = []
+    # How many phases this run has: each relaxed endpoint + band relax (+ climb).
+    n_phases = (2 if relax_endpoints else 0) + (2 if climb else 1)
+    _pidx = 0
 
     try:
         # ── 2. Relax both endpoints (ions only, fixed cell) ───────────────────
@@ -134,17 +139,30 @@ def run_neb(
         # endpoint is not a true minimum (which would make the barrier meaningless).
         if relax_endpoints:
             for label, end_atoms in (("initial", initial), ("final", final)):
+                _pidx += 1
                 end_atoms.calc = calc
+                e_start = float(end_atoms.get_potential_energy())
                 end_opt = Opt(
                     end_atoms,
                     logfile=str(out_dir / f"endpoint_{label}_relax.log"),
                 )
-                _attach_cancel(end_opt, progress_callback, max_steps)
+                _attach_cancel(end_opt, progress_callback, max_steps,
+                               phase=f"Relax {label} endpoint",
+                               phase_index=_pidx, phase_count=n_phases)
                 end_opt.run(fmax=fmax, steps=max_steps)
                 try:
-                    endpoint_converged[label] = bool(end_opt.converged())
+                    conv = bool(end_opt.converged())
                 except Exception:  # noqa: BLE001
-                    endpoint_converged[label] = None
+                    conv = None
+                endpoint_converged[label] = conv
+                phase_stats.append({
+                    "name": f"Relax {label} endpoint",
+                    "step_budget": max_steps, "steps_taken": int(end_opt.nsteps),
+                    "converged": conv, "fmax_target": fmax,
+                    "final_fmax": _safe_fmax(end_atoms, np),
+                    "energy_start": round(e_start, 6),
+                    "energy_end": round(float(end_atoms.get_potential_energy()), 6),
+                })
 
         # ── 3. Build the band: endpoints + interior images ────────────────────
         images = [initial]
@@ -165,7 +183,13 @@ def run_neb(
 
         opt = Opt(neb, logfile=str(out_dir / "neb.log"),
                   trajectory=str(out_dir / "neb.traj"))
-        _attach_cancel(opt, progress_callback, max_steps)
+
+        # Attach ONE progress/cancel observer to the band optimizer with a *mutable*
+        # phase label — ASE's opt.attach() accumulates observers, so attaching a
+        # second one per phase would make both fire every step (label flicker).
+        band_phase = ["NEB band", _pidx + 1]
+        _attach_cancel_mutable(opt, progress_callback, max_steps,
+                               band_phase, n_phases)
 
         # ── 4. Two-phase climbing image (CatTSunami recipe) ───────────────────
         # Phase A: no climb — relax the band to a loose force OR the phase-A step
@@ -174,18 +198,51 @@ def run_neb(
         # image is pulled exactly onto the saddle point. Because phase_a_steps is a
         # fraction (<= 0.9) of max_steps, there is ALWAYS budget left for phase B.
         if climb:
+            _pidx += 1
+            band_phase[0], band_phase[1] = "NEB band (relaxing)", _pidx
             opt.run(fmax=eff_climb_threshold, steps=phase_a_steps)
+            steps_phase_a = int(opt.nsteps)
+            phase_stats.append({
+                "name": "NEB band (relaxing, no climb)",
+                "step_budget": phase_a_steps, "steps_taken": steps_phase_a,
+                "converged": None, "fmax_target": eff_climb_threshold,
+                "notes": ["Loosely relaxes the whole band before the climbing image "
+                          "is switched on."],
+            })
             if opt.nsteps < max_steps:
                 neb.climb = True
                 climb_used = True
+                _pidx += 1
+                band_phase[0], band_phase[1] = "NEB band (climbing image)", _pidx
                 opt.run(fmax=fmax, steps=max_steps)
+                phase_stats.append({
+                    "name": "NEB band (climbing image)",
+                    "step_budget": max_steps - steps_phase_a,
+                    "steps_taken": int(opt.nsteps) - steps_phase_a,
+                    "converged": None, "fmax_target": fmax,
+                    "notes": ["Climbing image pins the highest image onto the saddle "
+                              "point for the true barrier."],
+                })
         else:
+            _pidx += 1
+            band_phase[0], band_phase[1] = "NEB band", _pidx
             opt.run(fmax=fmax, steps=max_steps)
+            phase_stats.append({
+                "name": "NEB band (no climbing image)",
+                "step_budget": max_steps, "steps_taken": int(opt.nsteps),
+                "converged": None, "fmax_target": fmax,
+            })
 
         try:
             converged = bool(opt.converged())
         except Exception:  # noqa: BLE001
             converged = opt.nsteps < max_steps
+        # The band's convergence verdict belongs to the LAST band phase.
+        if phase_stats:
+            for p in reversed(phase_stats):
+                if p["name"].startswith("NEB band"):
+                    p["converged"] = converged
+                    break
 
     except JobCancelled:
         cancelled = True
@@ -237,6 +294,18 @@ def run_neb(
         out_dir, images, energies, rcoord, saddle_index,
         write, AseAtomsAdaptor,
     )
+
+    # ── 6b. Convergence / diagnostics report ──────────────────────────────────
+    # The "detail file": phase-by-phase steps + a verdict on whether the barrier is
+    # converged or needs more steps. This is what explains the multi-phase run.
+    try:
+        files.update(_build_report(
+            out_dir, formula, calc_cfg, phase_stats, energies, n_atoms,
+            barrier_forward, barrier_reverse, reaction_energy, saddle_index,
+            converged, climb_used, warnings, max_steps, elapsed,
+        ))
+    except Exception as e:  # noqa: BLE001
+        print(f"[NEB] report generation warning: {e}")
 
     summary = {
         "status":              "success",
@@ -309,6 +378,15 @@ def _validate_endpoints(initial, final, np) -> Optional[str]:
     return None
 
 
+def _safe_fmax(atoms, np) -> Optional[float]:
+    """Max per-atom force (eV/Å), or None if forces can't be evaluated."""
+    try:
+        forces = atoms.get_forces()
+        return round(float(np.sqrt((forces ** 2).sum(axis=1).max())), 6)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _reaction_coordinate(images, np) -> list:
     """Cumulative path length (Å) along the band, image to image.
 
@@ -336,13 +414,38 @@ def _reaction_coordinate(images, np) -> list:
     return rc
 
 
-def _attach_cancel(opt, progress_callback, total):
-    """Make an optimizer cancellable + report progress: each step checks status."""
+def _attach_cancel(opt, progress_callback, total,
+                   phase=None, phase_index=None, phase_count=None):
+    """Make an optimizer cancellable + report progress: each step checks status.
+
+    ``phase``/``phase_index``/``phase_count`` label which NEB stage this optimizer
+    is (relax-initial, relax-final, band, climb) so the UI shows a meaningful
+    "Phase 3/4: NEB band" instead of a bar that silently restarts per optimizer.
+    """
     if progress_callback is None:
         return
 
     def _check():
-        progress_callback(step=opt.nsteps, total=total)   # raises if cancelled
+        progress_callback(step=opt.nsteps, total=total,   # raises if cancelled
+                          phase=phase, phase_index=phase_index,
+                          phase_count=phase_count)
+
+    opt.attach(_check, interval=1)
+
+
+def _attach_cancel_mutable(opt, progress_callback, total, phase_holder, phase_count):
+    """Like _attach_cancel but reads a mutable ``[label, index]`` holder.
+
+    Attaches ONE observer whose phase label/index can change between optimizer
+    runs (the band's no-climb → climbing transition) without stacking observers.
+    """
+    if progress_callback is None:
+        return
+
+    def _check():
+        progress_callback(step=opt.nsteps, total=total,   # raises if cancelled
+                          phase=phase_holder[0], phase_index=phase_holder[1],
+                          phase_count=phase_count)
 
     opt.attach(_check, interval=1)
 
@@ -401,6 +504,57 @@ def _write_outputs(out_dir, images, energies, rcoord, saddle_index,
         pass
 
     return files
+
+
+def _build_report(out_dir, formula, calc_cfg, phase_stats, energies, n_atoms,
+                  fwd, rev, dE, saddle_index, converged, climb_used, warnings,
+                  max_steps, elapsed) -> dict:
+    """Assemble + write the NEB convergence report; return its file entries."""
+    from app.services.simulation.report import ConvergenceReport, write_report
+
+    report = ConvergenceReport(
+        tool="compute_neb",
+        title="NEB migration barrier",
+        formula=formula,
+        calculator=calc_cfg,
+        elapsed_s=elapsed,
+    )
+    for p in phase_stats:
+        report.add_phase(
+            p["name"],
+            step_budget=p.get("step_budget"),
+            steps_taken=p.get("steps_taken"),
+            converged=p.get("converged"),
+            final_fmax=p.get("final_fmax"),
+            fmax_target=p.get("fmax_target"),
+            energy_start=p.get("energy_start"),
+            energy_end=p.get("energy_end"),
+            notes=p.get("notes", []),
+        )
+
+    report.summary = {
+        "Forward barrier (eV)": round(fwd, 4),
+        "Reverse barrier (eV)": round(rev, 4),
+        "Reaction energy ΔE (eV)": round(dE, 4),
+        "Saddle image index": saddle_index,
+        "Band converged": converged,
+        "Climbing image used": climb_used,
+    }
+
+    # Verdict: the plain-language "do I need more steps?" answer.
+    verdict: list[str] = []
+    if converged:
+        verdict.append("The NEB band reached the force threshold — the barrier is "
+                       "converged.")
+    else:
+        verdict.append(
+            f"The NEB band did NOT reach the force threshold within max_steps — "
+            f"the barrier is a lower bound. Rerun with max_steps = "
+            f"{min(max_steps * 2, 5000)} to converge the energy.")
+    verdict.extend(warnings)
+    report.verdict_lines = verdict
+
+    return write_report(str(out_dir), report)
 
 
 def _message(formula, fwd, rev, dE, converged, climb_used, elapsed) -> str:

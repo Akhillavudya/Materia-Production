@@ -36,25 +36,47 @@ class ProgressReporter:
         self.job_id = job_id
         self.min_interval_s = min_interval_s
         self._last_emit = 0.0
+        self._last_phase: str | None = None
         self._redis = _redis_client()
 
     def __call__(self, *, step: int, total: int | None = None,
                  energy: float | None = None, fmax: float | None = None,
-                 temperature: float | None = None) -> None:
-        """Invoked by the simulation each logged step. Throttled; checks cancel."""
+                 temperature: float | None = None,
+                 phase: str | None = None,
+                 phase_index: int | None = None,
+                 phase_count: int | None = None,
+                 message: str | None = None,
+                 **_ignored) -> None:
+        """Invoked by the simulation each logged step. Throttled; checks cancel.
+
+        ``phase``/``phase_index``/``phase_count`` describe which sub-stage of a
+        multi-phase job (e.g. NEB: relax-initial → relax-final → band → climb) is
+        running, so the UI can show "Phase 2/4: Relax final endpoint" instead of a
+        bar that silently restarts from 0 three times.
+        """
         # Cancellation check runs every call (cheap single-row read); a cancelled
         # job stops promptly rather than waiting for the next throttle window.
         if store.get_status(self.job_id) == JobStatus.CANCELLED.value:
             raise JobCancelled()
 
+        # `message` (used by some services) doubles as the phase label.
+        if phase is None and message is not None:
+            phase = message
+
+        # Always let a *phase change* through immediately (ignore throttle) so the
+        # label/bar never lags a stage boundary; otherwise honour the throttle.
         now = time.time()
-        if now - self._last_emit < self.min_interval_s:
+        phase_changed = phase is not None and phase != self._last_phase
+        if not phase_changed and now - self._last_emit < self.min_interval_s:
             return
         self._last_emit = now
+        self._last_phase = phase
 
         pct = round(100.0 * step / total, 1) if total else None
         payload = {"step": step, "total": total, "pct": pct,
-                   "energy": energy, "fmax": fmax, "temperature": temperature}
+                   "energy": energy, "fmax": fmax, "temperature": temperature,
+                   "phase": phase, "phase_index": phase_index,
+                   "phase_count": phase_count}
         store.update_progress(self.job_id, payload)
         self.publish({"type": "progress", **payload})
 

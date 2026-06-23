@@ -33,6 +33,7 @@ _ARTIFACT_KIND = {
     "neb_mep": "plot", "neb_path_csv": "data", "neb_traj": "trajectory",
     "saddle_poscar": "structure",
     "adsorption_csv": "data",
+    "convergence_report": "report", "convergence_json": "data",
 }
 
 
@@ -123,6 +124,7 @@ def _run(job_id: str, job_type: JobType) -> None:
                 strains=params.get("strains"),
                 max_steps=params.get("max_steps", 300),
                 symprec=params.get("symprec", 0.01),
+                relax_mode=params.get("relax_mode", "full"),
                 calculator=calc,
                 generate_vasp_inputs=spec.get("emit_vasp_inputs", True),
                 progress_callback=reporter,
