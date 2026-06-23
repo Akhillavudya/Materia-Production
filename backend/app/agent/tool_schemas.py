@@ -17,11 +17,11 @@ from app.tools.contracts import (
     AddAdsorbateInput,
     AddVacuumInput,
     AnalyzeSymmetryInput,
-    BuildSlabInput,
     ConvertStructureInput,
     CreateInterstitialInput,
     CreateSubstitutionInput,
     CreateVacancyInput,
+    GenerateKpointsInput,
     GeneratePoscarInput,
     GenerateVaspInputsInput,
     ListFilesInput,
@@ -59,6 +59,14 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
         "from a prior search, or a poscar_path to convert an existing session "
         "structure. Use generate_vasp_inputs instead for the full input set."
     ),
+    "generate_kpoints": (
+        "Write ONLY a VASP KPOINTS file at a chosen accuracy level. `accuracy_level` "
+        "sets the k-points-per-atom density: 'Low' (1000), 'Medium' (3000, default), "
+        "'High' (5000), or 'Custom' (then set `custom_kppa`). `gamma_centered=true` "
+        "(default) writes a Γ-centered mesh, false writes Monkhorst-Pack. Operates on "
+        "the active POSCAR by default, or pass poscar_path / material_id. Use "
+        "generate_vasp_inputs instead for the full POSCAR+INCAR+KPOINTS+POTCAR set."
+    ),
     "make_supercell": (
         "Replicate a crystal cell into a supercell and save it as the active POSCAR "
         "(so it chains into optimize/MD/VASP). `scaling` accepts a uniform factor "
@@ -81,19 +89,11 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
         "Set `layers` for an EXACT atomic-layer count (what the user means by 'N "
         "layers'); otherwise the slab is `min_slab_size` Å thick. Vacuum "
         "(`min_vacuum_size` Å) is INCLUDED, so do not also call add_vacuum. `shift` "
-        "selects the surface termination. For a slab PLUS an in-plane supercell and a "
-        "precise vacuum in one step, use build_slab. Operates on the active session "
-        "structure by default, or pass poscar_path / material_id."
-    ),
-    "build_slab": (
-        "Build a ready-to-use surface slab in ONE call: an exact-layer-count (hkl) slab, "
-        "an in-plane supercell, and a precise vacuum gap. Use this for requests like 'a "
-        "2x2 Cu(100) slab with 4 layers and 20 Å of vacuum'. `n_layers` is the exact "
-        "number of atomic planes; `supercell` is the in-plane replication (e.g. '2 2'); "
-        "`vacuum_angstrom` is the total gap; `vacuum_mode` is 'symmetric' (centred) or "
-        "'top_only' (all vacuum above). Saves POSCAR (active) + CIF + a provenance JSON. "
-        "Operates on the active session structure by default, or pass poscar_path / "
-        "material_id. Prefer this over chaining make_slab + make_supercell + add_vacuum."
+        "selects the surface termination. For an in-plane supercell, call make_supercell "
+        "afterwards (e.g. '2 2 1'); to change the vacuum precisely use add_vacuum. So 'a "
+        "2x2 Cu(100) slab, 4 layers' = make_slab(miller='1 0 0', layers=4) → "
+        "make_supercell('2 2 1'). Operates on the active session structure by default, "
+        "or pass poscar_path / material_id."
     ),
     "add_adsorbate": (
         "Adsorb a molecule (e.g. CO2, CO, H2O, O, H) onto the active surface slab. By "
@@ -102,7 +102,7 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
         "surface and saves it as the active POSCAR (fast). Set `relax=true` for an "
         "accurate AdsorbML-style background job that enumerates placements, relaxes them "
         "with an ML potential, and returns the lowest adsorption-energy structure (returns "
-        "a job_id). The active structure should be a slab first (build_slab / make_slab)."
+        "a job_id). The active structure should be a slab first (make_slab)."
     ),
     "convert_structure": (
         "Write a structure in another file format (`to_format`: poscar/cif/xyz/cssr/"
@@ -166,10 +166,10 @@ _TOOL_MODELS: list[tuple[str, type[BaseModel]]] = [
     ("search_materials", SearchMaterialsInput),
     ("generate_vasp_inputs", GenerateVaspInputsInput),
     ("generate_poscar", GeneratePoscarInput),
+    ("generate_kpoints", GenerateKpointsInput),
     ("make_supercell", MakeSupercellInput),
     ("add_vacuum", AddVacuumInput),
     ("make_slab", MakeSlabInput),
-    ("build_slab", BuildSlabInput),
     ("add_adsorbate", AddAdsorbateInput),
     ("convert_structure", ConvertStructureInput),
     ("analyze_symmetry", AnalyzeSymmetryInput),

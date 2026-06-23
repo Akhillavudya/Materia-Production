@@ -7,7 +7,7 @@ schemas — no hand-written description drift.
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -237,6 +237,12 @@ class GenerateSqsInput(BaseModel):
     target_comp: Optional[str] = Field(
         None, description='optional target composition override, e.g. '
                           '"Li:1,Ni:0.8,Mn:0.1,Co:0.1,O:2"')
+    substitute: Optional[str] = Field(
+        None, description='turn an ORDERED structure into a disordered one for SQS by '
+                          'partially substituting an element, e.g. "Si->S:0.25" means '
+                          '"replace 25% of Si with S". Multiple allowed, comma-separated '
+                          '("Si->S:0.25, Mg->Ca:0.1"). Use this for requests like '
+                          '"substitute 25% of Si with S in MgSi2Se4 using SQS".')
     supercell: str = Field(
         "2 2 2", description='SQS supercell size, e.g. "5 2 1" or "2 2 2"')
     cutoff: Optional[float] = Field(
@@ -261,6 +267,26 @@ class GeneratePoscarInput(BaseModel):
         None, description='"mp" | "c2db" | "oqmd" (paired with material_id)')
     poscar_path: Optional[str] = Field(
         None, description="existing session structure file to convert to a POSCAR")
+
+
+# ── 14.6 generate_kpoints ──────────────────────────────────────────────────────
+
+class GenerateKpointsInput(BaseModel):
+    accuracy_level: Literal["Low", "Medium", "High", "Custom"] = Field(
+        "Medium",
+        description='KPOINTS density: "Low" (kppa 1000), "Medium" (3000), "High" '
+                    '(5000), or "Custom" (use custom_kppa)')
+    gamma_centered: bool = Field(
+        True, description="Γ-centered mesh (recommended); False = Monkhorst-Pack")
+    custom_kppa: Optional[int] = Field(
+        None, ge=1,
+        description='k-points per atom; required when accuracy_level="Custom"')
+    material_id: Optional[str] = Field(
+        None, description="optional: use a database structure instead of a session file")
+    source: Optional[str] = Field(
+        None, description='"mp" | "c2db" | "oqmd" (paired with material_id)')
+    poscar_path: Optional[str] = Field(
+        None, description="session structure to use (defaults to the active POSCAR)")
 
 
 # ── 14.9 structure builders (Step 5.5) ────────────────────────────────────────
@@ -310,21 +336,6 @@ class MakeSlabInput(_StructureSourceInput):
         True, description="LLL-reduce the slab cell")
     shift: float = Field(
         0.0, description="termination shift (selects which surface cut)")
-
-
-class BuildSlabInput(_StructureSourceInput):
-    miller: str = Field(
-        "1 1 1", description='Miller index of the surface, e.g. "1 0 0"')
-    n_layers: int = Field(
-        4, ge=1, description="exact number of atomic layers (planes) in the slab")
-    supercell: str = Field(
-        "1 1", description='in-plane supercell, e.g. "2 2" or "4 4" (out-of-plane stays 1)')
-    vacuum_angstrom: float = Field(
-        20.0, gt=0, description="total vacuum gap to add along c, in Å")
-    vacuum_mode: str = Field(
-        "symmetric",
-        description='"symmetric" (vacuum split above/below, slab centred) or '
-                    '"top_only" (all vacuum above the slab)')
 
 
 class AddAdsorbateInput(_StructureSourceInput):

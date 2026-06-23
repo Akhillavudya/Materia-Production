@@ -46,6 +46,7 @@ from app.services.storage.file_service import (
     session_dir,
     session_path,
 )
+from app.services.vasp.kpoints import generate_kpoints_by_accuracy
 from app.services.vasp.poscar import write_poscar
 from app.services.vasp.service import vasp_service
 
@@ -490,6 +491,58 @@ def generate_poscar(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# TOOL — generate_kpoints  (KPOINTS by accuracy level)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def generate_kpoints(
+    accuracy_level: str = "Medium",
+    gamma_centered: bool = True,
+    custom_kppa:    Optional[int] = None,
+    material_id:    Optional[str] = None,
+    source:         Optional[str] = None,
+    poscar_path:    Optional[str] = None,
+) -> dict:
+    """Write a VASP KPOINTS file at a chosen accuracy level (fast).
+
+    `accuracy_level` sets the k-points-per-atom density: "Low" (1000), "Medium"
+    (3000), "High" (5000), or "Custom" (uses `custom_kppa`). `gamma_centered=True`
+    writes a Γ-centered mesh (recommended); False writes Monkhorst-Pack. Saves
+    ``KPOINTS`` into the session root next to the active POSCAR. Operates on the
+    active session structure by default; pass `poscar_path` for a specific session
+    file or `material_id` (+ `source`) to fetch one from a database.
+    """
+    try:
+        structure = _resolve_structure(material_id, source, poscar_path)
+    except _StructureError as e:
+        return {"status": "error", "message": str(e)}
+
+    try:
+        text, kppa = generate_kpoints_by_accuracy(
+            structure, accuracy_level=accuracy_level,
+            custom_kppa=custom_kppa, gamma_centered=gamma_centered)
+    except ValueError as e:
+        return {"status": "error", "message": str(e)}
+    except Exception as e:  # noqa: BLE001
+        return {"status": "error", "message": f"KPOINTS generation failed: {e}"}
+
+    out = session_dir() / "KPOINTS"
+    out.write_text(text if text.endswith("\n") else text + "\n")
+
+    style = "Γ-centered" if gamma_centered else "Monkhorst-Pack"
+    return {
+        "status":        "success",
+        "accuracy_level": accuracy_level,
+        "kppa":          kppa,
+        "gamma_centered": gamma_centered,
+        "files_written": ["KPOINTS"],
+        "message": (
+            f"KPOINTS written at {accuracy_level} accuracy "
+            f"(kppa={kppa}, {style})."
+        ),
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # TOOLS — make_supercell / add_vacuum / make_slab / convert_structure (Step 5.5)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -689,7 +742,8 @@ def make_slab(
     `shift` selects which surface termination; `lll_reduce` reduces the slab cell.
     Operates on the active session structure by default; pass `poscar_path` for a
     specific session file or `material_id` (+ `source`) to fetch one from a database.
-    For a slab PLUS an in-plane supercell and a precise vacuum, prefer build_slab.
+    For an in-plane supercell, call make_supercell afterwards (e.g. "2 2 1"); to
+    change the vacuum gap precisely, use add_vacuum — each is its own tool.
     """
     try:
         structure = _resolve_build_input(material_id, source, poscar_path)
@@ -713,76 +767,6 @@ def make_slab(
     return _finish_build(result, "make_slab", n_before, tag=tag, detail=detail)
 
 
-def build_slab(
-    miller:          str   = "1 1 1",
-    n_layers:        int   = 4,
-    supercell:       str   = "1 1",
-    vacuum_angstrom: float = 20.0,
-    vacuum_mode:     str   = "symmetric",
-    material_id:     Optional[str] = None,
-    source:          Optional[str] = None,
-    poscar_path:     Optional[str] = None,
-) -> dict:
-    """Build a ready-to-use surface slab: exact layer count + in-plane supercell + vacuum.
-
-    One call for the common workflow "an N-layer (hkl) slab, M×N in-plane, with V Å of
-    vacuum". The layer count is EXACT (distinct atomic planes, not an Å thickness), the
-    in-plane supercell leaves the c-axis untouched, and the vacuum gap is set precisely
-    (`vacuum_mode`: "symmetric" centres the slab, "top_only" puts all vacuum above).
-    Saves POSCAR (active for the next step) plus a CIF and a sidecar JSON recording the
-    provenance (source, Miller, layers, vacuum, supercell, pymatgen version). Operates on
-    the active session structure by default; pass `poscar_path` / `material_id` (+ `source`).
-    """
-    from app.services.structure import slab_builder
-
-    try:
-        structure = _resolve_build_input(material_id, source, poscar_path)
-    except _StructureError as e:
-        return {"status": "error", "message": str(e)}
-
-    n_before = len(structure)
-    label = f"{source}:{material_id}" if material_id else None
-    try:
-        slab, metadata = slab_builder.build_slab(
-            structure, miller_index=miller, n_layers=n_layers, supercell=supercell,
-            vacuum_angstrom=vacuum_angstrom, vacuum_mode=vacuum_mode, source_label=label)
-    except Exception as e:  # noqa: BLE001
-        return {"status": "error", "message": f"build_slab failed: {e}"}
-
-    if len(slab) > settings.max_atoms:
-        return {"status": "error",
-                "message": (f"The slab has {len(slab)} atoms, above the "
-                            f"{settings.max_atoms}-atom limit on this server. "
-                            "Use fewer layers or a smaller supercell.")}
-
-    try:
-        ex = slab_builder.export_slab(slab, metadata, session_dir())
-    except Exception as e:  # noqa: BLE001
-        return {"status": "error", "message": f"Could not write the slab: {e}"}
-
-    return {
-        "status":         "success",
-        "operation":      "build_slab",
-        "formula":        metadata["formula"],
-        "n_sites_before": n_before,
-        "n_sites":        metadata["n_atoms"],
-        "n_layers":       metadata["n_layers"],
-        "supercell":      metadata["supercell_matrix"],
-        "vacuum_mode":    metadata["vacuum_mode"],
-        "measured_vacuum_angstrom": metadata["measured_vacuum_angstrom"],
-        "lattice_abc":    metadata["lattice_abc"],
-        "files_written":  ex["files_written"],
-        "message": (
-            f"build_slab: ({miller}) {metadata['n_layers']}-layer "
-            f"{metadata['formula']} slab, {metadata['supercell_matrix'][0][0]}×"
-            f"{metadata['supercell_matrix'][1][1]} in-plane, "
-            f"{metadata['measured_vacuum_angstrom']} Å {metadata['vacuum_mode']} vacuum "
-            f"({metadata['n_atoms']} atoms). Wrote {ex['files_written'][0]} "
-            "(active as POSCAR) + CIF + provenance JSON."
-        ),
-    }
-
-
 def add_adsorbate(
     molecule:         str,
     site_type:        str   = "ontop",
@@ -804,8 +788,8 @@ def add_adsorbate(
     relax each with an ML potential (MACE/MatterSim), discard desorbed/dissociated
     configs, and return the lowest adsorption-energy structure. Returns a job_id.
 
-    Operates on the active session structure (which should be a slab — use build_slab /
-    make_slab first); pass `poscar_path` / `material_id` (+ `source`) for another source.
+    Operates on the active session structure (which should be a slab — use make_slab
+    first); pass `poscar_path` / `material_id` (+ `source`) for another source.
     """
     from app.services.structure import adsorption
 
@@ -1577,9 +1561,38 @@ def _parse_target_comp(text: Optional[str]) -> Optional[dict]:
     return out or None
 
 
+def _parse_substitutions(text: Optional[str]) -> Optional[list]:
+    """Parse a partial-substitution spec into [{"from","to","fraction"}, ...].
+
+    Accepts entries like "Si->S:0.25", "Si->S=25%", or "Si:S:0.25", separated by
+    commas/semicolons. Means "replace 25% of Si sites' occupancy with S". None/blank
+    → None. Raises ValueError on a malformed entry.
+    """
+    if not text:
+        return None
+    out: list = []
+    for part in str(text).replace(";", ",").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        m = re.match(r"^\s*([A-Za-z]+)\s*(?:->|:)\s*([A-Za-z]+)\s*[:=]\s*([0-9.]+%?)\s*$",
+                     part)
+        if not m:
+            raise ValueError(
+                f"Invalid substitution '{part}'. Use 'From->To:fraction', "
+                "e.g. 'Si->S:0.25' (replace 25% of Si with S).")
+        frm, to, frac_txt = m.group(1), m.group(2), m.group(3)
+        frac = float(frac_txt[:-1]) / 100.0 if frac_txt.endswith("%") else float(frac_txt)
+        if frac > 1.0:                    # tolerate "25" meaning 25%
+            frac /= 100.0
+        out.append({"from": frm, "to": to, "fraction": frac})
+    return out or None
+
+
 def generate_sqs(
     cif_name:         Optional[str] = None,
     target_comp:      Optional[str] = None,
+    substitute:       Optional[str] = None,
     supercell:        str           = "2 2 2",
     cutoff:           Optional[float] = None,
     n_parallel:       int           = 4,
@@ -1588,9 +1601,15 @@ def generate_sqs(
 ) -> dict:
     """Queue a Special Quasi-random Structure (SQS) job via ATAT mcsqs.
 
-    Takes a disordered structure (partial site occupancies), finds the best
-    quasi-random ordering in a supercell, and writes it as a POSCAR. Long-running,
-    so this enqueues a job and returns a ``job_id`` immediately.
+    SQS needs partial site occupancies. There are two ways to supply them:
+      • give a disordered structure (a CIF with partial occupancies), or
+      • pass ``substitute`` (e.g. "Si->S:0.25") to turn an *ordered* structure into a
+        disordered one — "substitute 25% of Si with S" — built from the active
+        POSCAR / material. This is the path for requests like "substitute 25% of Si
+        with S in MgSi2Se4 using SQS".
+
+    Finds the best quasi-random ordering in a supercell and writes it as a POSCAR.
+    Long-running, so this enqueues a job and returns a ``job_id`` immediately.
     """
     try:
         sc = _parse_supercell(supercell)
@@ -1602,12 +1621,21 @@ def generate_sqs(
     except ValueError as e:
         return {"status": "error", "message": str(e)}
 
+    try:
+        subs = _parse_substitutions(substitute)
+    except ValueError as e:
+        return {"status": "error", "message": str(e)}
+
     n_parallel = min(max(int(n_parallel), 1), 16)
     time_budget_s = max(int(time_budget_s), 30)
 
     try:
         if cif_name:
             cif_path = find_structure_in_session(cif_name, prefer_contcar=False)
+        elif subs:
+            # With a substitution spec we START from an ordered structure (the active
+            # POSCAR / material) and inject partial occupancies inside the job.
+            cif_path = find_structure_in_session(None, prefer_contcar=True)
         else:
             # SQS needs a DISORDERED structure; POSCARs are always ordered, so prefer
             # a .cif (a *_disordered.cif from activation first) over the default resolver.
@@ -1627,6 +1655,7 @@ def generate_sqs(
         output_dir=session_path() / "sqs",
         params={
             "target_comp": comp,
+            "substitutions": subs,
             "supercell": list(sc),
             "cutoff": cutoff,
             "n_parallel": n_parallel,

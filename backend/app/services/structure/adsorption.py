@@ -78,8 +78,8 @@ def _build_molecule(formula: str):
 def _as_site_finder(slab):
     """Wrap a slab Structure/Slab in an ``AdsorbateSiteFinder``.
 
-    The surface must be oriented with the normal along c (build_slab / make_slab
-    both reorient this way), so the default z-normal site detection is correct.
+    The surface must be oriented with the normal along c (make_slab reorients this
+    way), so the default z-normal site detection is correct.
     """
     from pymatgen.analysis.adsorption import AdsorbateSiteFinder
     return AdsorbateSiteFinder(slab)

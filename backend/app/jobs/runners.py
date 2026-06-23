@@ -146,6 +146,7 @@ def _run(job_id: str, job_type: JobType) -> None:
                 cif_path=spec["poscar_path"],   # resolved disordered structure file
                 output_dir=spec["output_dir"],
                 target_comp=params.get("target_comp"),
+                substitutions=params.get("substitutions"),
                 supercell=tuple(params.get("supercell", (2, 2, 2))),
                 cutoff=params.get("cutoff"),
                 n_parallel=params.get("n_parallel", 4),

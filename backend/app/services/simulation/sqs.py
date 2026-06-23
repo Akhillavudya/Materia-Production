@@ -49,6 +49,7 @@ def run_sqs(
     cif_path:          str,
     output_dir:        str,
     target_comp:       Optional[dict] = None,
+    substitutions:     Optional[list] = None,
     supercell:         tuple = (2, 2, 2),
     cutoff:            Optional[float] = None,
     n_parallel:        int   = 4,
@@ -57,7 +58,14 @@ def run_sqs(
     time_budget_s:     int   = 600,
     progress_callback: Optional[Callable[..., None]] = None,
 ) -> dict:
-    """Generate an SQS with ATAT mcsqs. Returns the standard result envelope."""
+    """Generate an SQS with ATAT mcsqs. Returns the standard result envelope.
+
+    ``substitutions`` (optional) lets an *ordered* input become disordered before
+    the search: a list of ``{"from": "Si", "to": "S", "fraction": 0.25}`` dicts,
+    meaning "replace 25% of every Si site's occupancy with S". This is what makes
+    a request like "substitute 25% of Si with S in MgSi2Se4" possible — SQS itself
+    needs partial occupancies, and this injects them onto the matching sublattice.
+    """
     try:
         import numpy as np
         from pymatgen.core import Structure
@@ -78,11 +86,19 @@ def run_sqs(
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # ── 1. Read disordered structure ──────────────────────────────────────────
+    # ── 1. Read structure ──────────────────────────────────────────────────────
     try:
         structure = Structure.from_file(str(cif_path))
     except Exception as e:  # noqa: BLE001
         return {"status": "error", "message": f"Failed to read structure: {e}"}
+
+    # ── 1b. Inject partial occupancies from a substitution spec (if given) ──────
+    if substitutions:
+        try:
+            structure, applied = _apply_partial_substitutions(structure, substitutions)
+        except ValueError as e:
+            return {"status": "error", "message": str(e)}
+        logger.info("[SQS] applied partial substitutions: %s", applied)
 
     # ── 2. Detect disordered sublattices → parent + occupancy spec ────────────
     parent, sqs_info = _build_parent_and_sublattices(
@@ -92,9 +108,11 @@ def run_sqs(
         return {
             "status": "error",
             "message": (
-                "No disordered sublattice found. SQS needs a structure with "
-                "partial site occupancies (a disordered CIF), optionally guided "
-                "by a target composition."
+                "No disordered sublattice found. SQS needs partial site "
+                "occupancies. Either provide a disordered CIF, or pass a "
+                "substitution like 'Si->S:0.25' (replace 25% of Si with S) so "
+                "the tool can build the disordered sublattice from an ordered "
+                "structure."
             ),
         }
 
@@ -181,6 +199,45 @@ def run_sqs(
         "n_parallel":       n_parallel,
         "files":            files,
     }
+
+
+# ── Partial substitution: ordered structure → disordered sublattice ───────────
+
+def _apply_partial_substitutions(structure, substitutions):
+    """Replace a fraction of one element's sites with partial occupancy of another.
+
+    Each spec is ``{"from": "Si", "to": "S", "fraction": 0.25}``: every ordered
+    site whose species is ``from`` becomes ``{from: 1-frac, to: frac}``, creating
+    the disordered sublattice SQS needs. Returns (structure, applied_summary).
+    Raises ValueError on a bad spec or an element that isn't present.
+    """
+    applied = []
+    for spec in substitutions:
+        try:
+            frm = str(spec["from"]).strip()
+            to = str(spec["to"]).strip()
+            frac = float(spec["fraction"])
+        except (KeyError, TypeError, ValueError):
+            raise ValueError(
+                f"Invalid substitution spec {spec!r}. Expected "
+                "{'from': 'Si', 'to': 'S', 'fraction': 0.25}.")
+        if not 0.0 < frac < 1.0:
+            raise ValueError(
+                f"Substitution fraction for {frm}->{to} must be between 0 and 1 "
+                f"(got {frac}). A full (100%) swap is an ordered replacement, not SQS.")
+
+        matched = 0
+        for i, site in enumerate(structure):
+            if site.is_ordered and site.specie.symbol == frm:
+                structure.replace(i, {frm: 1.0 - frac, to: frac})
+                matched += 1
+        if matched == 0:
+            present = sorted({el.symbol for el in structure.composition.elements})
+            raise ValueError(
+                f"Cannot substitute {frm}->{to}: no '{frm}' sites in the structure "
+                f"(elements present: {', '.join(present)}).")
+        applied.append(f"{frm}->{to} on {matched} site(s) at {frac:g}")
+    return structure, applied
 
 
 # ── Sublattice detection (from notebook In[15]) ───────────────────────────────

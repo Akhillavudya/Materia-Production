@@ -280,6 +280,76 @@ def add_vacuum(structure, axis="c", thickness=15.0, side="both"):
                      coords_are_cartesian=True)
 
 
+# ── Exact atomic-layer counting (used when make_slab is given `layers`) ───────
+# Two atoms are on the same atomic plane if their positions along the surface
+# normal differ by less than this (Å). A generous-but-tight tolerance: it absorbs
+# floating-point noise yet keeps genuinely distinct planes (interlayer spacings are
+# typically > 1 Å) separate.
+_PLANE_TOL = 0.10
+
+
+def _normal_unit(structure) -> np.ndarray:
+    """Unit vector along the c (out-of-plane) lattice direction."""
+    c = structure.lattice.matrix[2]
+    return c / float(np.linalg.norm(c))
+
+
+def _plane_groups(structure, tol: float = _PLANE_TOL) -> list[list[int]]:
+    """Group site indices into atomic planes along the surface normal (bottom→top).
+
+    Wrap-aware: an atom wrapped just past the periodic boundary would otherwise be
+    miscounted as a separate plane, so we cut the periodic axis at its largest empty
+    region (the vacuum) to form a single contiguous, monotonically increasing block.
+    """
+    unit = _normal_unit(structure)
+    c_len = float(np.linalg.norm(structure.lattice.matrix[2]))
+    proj = np.mod(structure.cart_coords @ unit, c_len)
+    order = list(np.argsort(proj))
+    if len(order) == 1:
+        return [[int(order[0])]]
+
+    sorted_proj = proj[order]
+    gaps = list(np.diff(sorted_proj)) + [c_len - (sorted_proj[-1] - sorted_proj[0])]
+    cut = int(np.argmax(gaps))  # largest empty region = vacuum; block starts after it
+    start = (cut + 1) % len(order)
+    rolled = order[start:] + order[:start]
+
+    base = proj[rolled[0]]
+    pos = np.mod(proj[rolled] - base, c_len)
+    groups: list[list[int]] = [[int(rolled[0])]]
+    last = pos[0]
+    for k in range(1, len(rolled)):
+        if pos[k] - last <= tol:
+            groups[-1].append(int(rolled[k]))
+        else:
+            groups.append([int(rolled[k])])
+        last = pos[k]
+    return groups
+
+
+def _enforce_layer_count(slab, n_layers: int, tol: float = _PLANE_TOL):
+    """Trim the slab to exactly ``n_layers`` distinct atomic planes (from the top).
+
+    Raises if the generated slab has fewer planes than requested (caller should ask
+    for a thicker slab — should not happen given unit-plane over-generation).
+    """
+    groups = _plane_groups(slab, tol)
+    n_planes = len(groups)
+    if n_planes < n_layers:
+        raise ValueError(
+            f"the generated slab has only {n_planes} atomic plane(s) but "
+            f"{n_layers} were requested; try a smaller layers or a different "
+            "Miller index.")
+    if n_planes == n_layers:
+        return slab
+    drop: list[int] = []
+    for grp in groups[n_layers:]:
+        drop.extend(grp)
+    slab = slab.copy()
+    slab.remove_sites(sorted(drop))
+    return slab
+
+
 def make_slab(structure, miller="1 1 1", min_slab_size=10.0, min_vacuum_size=15.0,
               center_slab=True, lll_reduce=True, shift=0.0, layers=None):
     """Cut a surface slab from a bulk structure along a Miller plane.
@@ -323,7 +393,6 @@ def make_slab(structure, miller="1 1 1", min_slab_size=10.0, min_vacuum_size=15.
             in_unit_planes=True, lll_reduce=False,
             center_slab=False, primitive=False, reorient_lattice=True,
         )
-        from app.services.structure.slab_builder import _enforce_layer_count
         slab = _enforce_layer_count(sg.get_slab(shift=float(shift)), n_layers)
         side = "both" if center_slab else "top"
         return add_vacuum(slab, axis="c", thickness=float(min_vacuum_size), side=side)

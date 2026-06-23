@@ -16,6 +16,7 @@ EXPECTED=(
   "mace_models/mace-omat-0-medium"
   "mace_models/MACE-matpes-pbe-omat-ft"
   "matterSim_models/mattersim-v1.0.0-1M"
+  "matterSim_models/mattersim-v1.0.0-5M"
 )
 
 echo "Checking model checkpoints under: $DEST"
@@ -36,11 +37,14 @@ fi
 
 cat <<EOF
 
-Some models are missing. Copy them into "$DEST" using one of:
-  - rsync from your local machine:
-      rsync -avz ./pre_trained_models/ user@server:$DEST/
-  - or download from your model registry / HuggingFace mirror into the paths above.
+Some models are missing. Fetch them from their official releases with:
+  - MACE (mp-0b3 / mpa / omat / matpes):
+      python backend/scripts/download_mace.py          # the 3 advertised-but-missing
+      python backend/scripts/download_mace.py --all    # all four MACE models
+  - MatterSim (1M / 5M):
+      python backend/scripts/download_mattersim_5m.py --all
 
-(Replace this stub with your actual registry URLs once you choose one.)
+Or rsync a populated mount from another machine:
+      rsync -avz ./pre_trained_models/ user@server:$DEST/
 EOF
 exit 1
