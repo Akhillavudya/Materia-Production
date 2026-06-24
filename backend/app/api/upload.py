@@ -20,6 +20,7 @@ from app.repositories import message_repository, session_repository
 from app.schemas.upload import UploadedFileOut
 from app.services.storage.file_service import (
     STORAGE_ROOT,
+    find_structure_in_session,
     get_session_dir,
     get_upload_dir,
     is_upload_allowed,
@@ -238,8 +239,9 @@ async def launch_optimize(
     """Launch a geometry-optimization job from the UI tool panel."""
     await get_session_for_user(session_id, current_user, db)
     name = await _store_optional(session_id, structure)
+    t_before = time.time()
     from app.tools import material_tools
-    return await _run_tool_launch(session_id, current_user.id, lambda: material_tools.optimize_structure(
+    result = await _run_tool_launch(session_id, current_user.id, lambda: material_tools.optimize_structure(
         poscar_name=name,
         fmax=float(fmax),
         cell_relax=cell_relax,
@@ -248,6 +250,9 @@ async def launch_optimize(
         calculator_type=calculator_type,
         calculator_model=calculator_model or None,
     ))
+    await _log_manual_run(db, session_id, tool="optimize_structure",
+                          label="Geometry optimization", result=result, t_before=t_before)
+    return result
 
 
 @router.post("/sessions/{session_id}/md")
@@ -269,8 +274,9 @@ async def launch_md(
     """Launch a molecular-dynamics (NVT/NPT) job from the UI tool panel."""
     await get_session_for_user(session_id, current_user, db)
     name = await _store_optional(session_id, structure)
+    t_before = time.time()
     from app.tools import material_tools
-    return await _run_tool_launch(session_id, current_user.id, lambda: material_tools.run_md_simulation(
+    result = await _run_tool_launch(session_id, current_user.id, lambda: material_tools.run_md_simulation(
         poscar_name=name,
         ensemble=ensemble,
         temperature=float(temperature),
@@ -280,6 +286,9 @@ async def launch_md(
         calculator_type=calculator_type,
         calculator_model=calculator_model or None,
     ))
+    await _log_manual_run(db, session_id, tool="run_md_simulation",
+                          label="Molecular dynamics", result=result, t_before=t_before)
+    return result
 
 
 @router.post("/sessions/{session_id}/phonons")
@@ -299,8 +308,9 @@ async def launch_phonons(
     """Launch a phonon (phonopy) job from the UI tool panel."""
     await get_session_for_user(session_id, current_user, db)
     name = await _store_optional(session_id, structure)
+    t_before = time.time()
     from app.tools import material_tools
-    return await _run_tool_launch(session_id, current_user.id, lambda: material_tools.compute_phonons(
+    result = await _run_tool_launch(session_id, current_user.id, lambda: material_tools.compute_phonons(
         poscar_name=name,
         supercell=supercell,
         disp_distance=float(disp_distance),
@@ -308,6 +318,9 @@ async def launch_phonons(
         calculator_type=calculator_type,
         calculator_model=calculator_model or None,
     ))
+    await _log_manual_run(db, session_id, tool="compute_phonons",
+                          label="Phonons", result=result, t_before=t_before)
+    return result
 
 
 @router.post("/sessions/{session_id}/elastic")
@@ -326,14 +339,18 @@ async def launch_elastic(
     """Launch an elastic / mechanical-properties job from the UI tool panel."""
     await get_session_for_user(session_id, current_user, db)
     name = await _store_optional(session_id, structure)
+    t_before = time.time()
     from app.tools import material_tools
-    return await _run_tool_launch(session_id, current_user.id, lambda: material_tools.compute_elastic_tensor(
+    result = await _run_tool_launch(session_id, current_user.id, lambda: material_tools.compute_elastic_tensor(
         poscar_name=name,
         fmax=float(fmax),
         max_steps=int(max_steps),
         calculator_type=calculator_type,
         calculator_model=calculator_model or None,
     ))
+    await _log_manual_run(db, session_id, tool="compute_elastic_tensor",
+                          label="Elastic / mechanical", result=result, t_before=t_before)
+    return result
 
 
 @router.post("/sessions/{session_id}/sqs")
@@ -352,14 +369,18 @@ async def launch_sqs(
     """Launch an SQS (special quasi-random structure) job from the UI tool panel."""
     await get_session_for_user(session_id, current_user, db)
     name = await _store_optional(session_id, structure)
+    t_before = time.time()
     from app.tools import material_tools
-    return await _run_tool_launch(session_id, current_user.id, lambda: material_tools.generate_sqs(
+    result = await _run_tool_launch(session_id, current_user.id, lambda: material_tools.generate_sqs(
         cif_name=name,
         target_comp=(target_comp or None),
         supercell=supercell,
         n_parallel=int(n_parallel),
         time_budget_s=int(time_budget_s),
     ))
+    await _log_manual_run(db, session_id, tool="generate_sqs",
+                          label="SQS (random alloy)", result=result, t_before=t_before)
+    return result
 
 
 @router.post("/sessions/{session_id}/neb")
@@ -404,9 +425,12 @@ async def launch_neb(
             climb=bool(climb),
         )
 
+    t_before = time.time()
     result = await asyncio.get_running_loop().run_in_executor(None, _run)
     if isinstance(result, dict) and result.get("status") == "error":
         raise HTTPException(status_code=400, detail=result.get("message", "NEB launch failed"))
+    await _log_manual_run(db, session_id, tool="compute_neb",
+                          label="NEB migration barrier", result=result, t_before=t_before)
     return result
 
 
@@ -445,6 +469,12 @@ async def _log_manual_run(
         "files":  list_new_files(session_id, t_before),
         "manual": True,
     }
+    # Async-job launches return a job_id (no files yet). Carry it on the card so
+    # the chat timeline shows "<tool> — job <id> running" and links to the Jobs
+    # tab, instead of rendering nothing.
+    if result.get("job_id"):
+        card["job_id"] = result["job_id"]
+        card["job_type"] = result.get("type")
     content = result.get("message") or f"Ran {label}"
     await message_repository.add(
         db, session_id=session_id, role="assistant",
@@ -595,4 +625,219 @@ async def launch_convert_structure(
     ))
     await _log_manual_run(db, session_id, tool="convert_structure",
                           label="Convert format", result=result, t_before=t_before)
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Manual VASP-input + defect launchers
+#
+# Same instant pattern as the structure tools above. The VASP-input tools
+# (generate_vasp_inputs / generate_poscar / generate_kpoints) resolve their
+# input through ``_resolve_structure``, which — unlike the build/defect tools —
+# does NOT auto-detect the session's active POSCAR. So when no file is uploaded
+# we resolve the active structure name inside the tool worker thread (where the
+# session context is set) via ``_active_structure_name``.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _active_structure_name(name: str | None):
+    """The uploaded file name, else the session's active structure file name.
+
+    Must run inside the tool worker thread (session ContextVar set). Returns an
+    error envelope when nothing is available, so the caller can surface a 400
+    instead of a 500.
+    """
+    if name:
+        return name
+    try:
+        return find_structure_in_session(None).name
+    except FileNotFoundError:
+        return {"status": "error",
+                "message": ("No active structure in this session. Upload or "
+                            "generate a structure first.")}
+
+
+@router.post("/sessions/{session_id}/generate_vasp_inputs")
+@limiter.limit("20/minute")
+async def launch_generate_vasp_inputs(
+    request: Request,
+    session_id: str,
+    structure: UploadFile = File(None),
+    task: str = Form("relaxation"),
+    cell_relax: str = Form("none"),
+    functional: str = Form("pbe"),
+    vdw: str = Form("none"),
+    soc: bool = Form(False),
+    hubbard_u: bool = Form(False),
+    dipole: bool = Form(False),
+    charge: float = Form(0.0),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Generate a full VASP input set (POSCAR + INCAR + KPOINTS) from the UI panel."""
+    await get_session_for_user(session_id, current_user, db)
+    name = await _store_optional(session_id, structure)
+    t_before = time.time()
+    from app.tools import material_tools
+
+    def _go():
+        resolved = _active_structure_name(name)
+        if isinstance(resolved, dict):
+            return resolved
+        return material_tools.generate_vasp_inputs(
+            poscar_path=resolved,
+            task=task,
+            cell_relax=cell_relax,
+            functional=functional,
+            vdw=vdw,
+            soc=bool(soc),
+            hubbard_u=bool(hubbard_u),
+            dipole=bool(dipole),
+            charge=float(charge),
+        )
+
+    result = await _run_tool_launch(session_id, current_user.id, _go)
+    await _log_manual_run(db, session_id, tool="generate_vasp_inputs",
+                          label="VASP inputs", result=result, t_before=t_before)
+    return result
+
+
+@router.post("/sessions/{session_id}/generate_poscar")
+@limiter.limit("20/minute")
+async def launch_generate_poscar(
+    request: Request,
+    session_id: str,
+    structure: UploadFile = File(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Generate ONLY a POSCAR for the active (or uploaded) structure from the UI panel."""
+    await get_session_for_user(session_id, current_user, db)
+    name = await _store_optional(session_id, structure)
+    t_before = time.time()
+    from app.tools import material_tools
+
+    def _go():
+        resolved = _active_structure_name(name)
+        if isinstance(resolved, dict):
+            return resolved
+        return material_tools.generate_poscar(poscar_path=resolved)
+
+    result = await _run_tool_launch(session_id, current_user.id, _go)
+    await _log_manual_run(db, session_id, tool="generate_poscar",
+                          label="Generate POSCAR", result=result, t_before=t_before)
+    return result
+
+
+@router.post("/sessions/{session_id}/generate_kpoints")
+@limiter.limit("20/minute")
+async def launch_generate_kpoints(
+    request: Request,
+    session_id: str,
+    structure: UploadFile = File(None),
+    accuracy_level: str = Form("Medium"),
+    gamma_centered: bool = Form(True),
+    custom_kppa: int | None = Form(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Write a KPOINTS file at a chosen accuracy level from the UI panel."""
+    await get_session_for_user(session_id, current_user, db)
+    name = await _store_optional(session_id, structure)
+    t_before = time.time()
+    from app.tools import material_tools
+
+    def _go():
+        resolved = _active_structure_name(name)
+        if isinstance(resolved, dict):
+            return resolved
+        return material_tools.generate_kpoints(
+            accuracy_level=accuracy_level,
+            gamma_centered=bool(gamma_centered),
+            custom_kppa=(int(custom_kppa) if custom_kppa is not None else None),
+            poscar_path=resolved,
+        )
+
+    result = await _run_tool_launch(session_id, current_user.id, _go)
+    await _log_manual_run(db, session_id, tool="generate_kpoints",
+                          label="Generate KPOINTS", result=result, t_before=t_before)
+    return result
+
+
+@router.post("/sessions/{session_id}/create_vacancy")
+@limiter.limit("20/minute")
+async def launch_create_vacancy(
+    request: Request,
+    session_id: str,
+    structure: UploadFile = File(None),
+    element: str | None = Form(None),
+    supercell: str | None = Form(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a vacancy defect in a supercell of the active structure (UI panel)."""
+    await get_session_for_user(session_id, current_user, db)
+    name = await _store_optional(session_id, structure)
+    t_before = time.time()
+    from app.tools import material_tools
+    result = await _run_tool_launch(session_id, current_user.id, lambda: material_tools.create_vacancy(
+        element=(element or None),
+        supercell=(supercell or None),
+        poscar_path=name,
+    ))
+    await _log_manual_run(db, session_id, tool="create_vacancy",
+                          label="Create vacancy", result=result, t_before=t_before)
+    return result
+
+
+@router.post("/sessions/{session_id}/create_substitution")
+@limiter.limit("20/minute")
+async def launch_create_substitution(
+    request: Request,
+    session_id: str,
+    structure: UploadFile = File(None),
+    from_element: str = Form(...),
+    to_element: str = Form(...),
+    supercell: str | None = Form(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Substitute one element for another in a supercell of the active structure (UI panel)."""
+    await get_session_for_user(session_id, current_user, db)
+    name = await _store_optional(session_id, structure)
+    t_before = time.time()
+    from app.tools import material_tools
+    result = await _run_tool_launch(session_id, current_user.id, lambda: material_tools.create_substitution(
+        from_element=from_element,
+        to_element=to_element,
+        supercell=(supercell or None),
+        poscar_path=name,
+    ))
+    await _log_manual_run(db, session_id, tool="create_substitution",
+                          label="Create substitution", result=result, t_before=t_before)
+    return result
+
+
+@router.post("/sessions/{session_id}/create_interstitial")
+@limiter.limit("20/minute")
+async def launch_create_interstitial(
+    request: Request,
+    session_id: str,
+    structure: UploadFile = File(None),
+    insert_element: str = Form(...),
+    supercell: str | None = Form(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Insert an interstitial atom in a supercell of the active structure (UI panel)."""
+    await get_session_for_user(session_id, current_user, db)
+    name = await _store_optional(session_id, structure)
+    t_before = time.time()
+    from app.tools import material_tools
+    result = await _run_tool_launch(session_id, current_user.id, lambda: material_tools.create_interstitial(
+        insert_element=insert_element,
+        supercell=(supercell or None),
+        poscar_path=name,
+    ))
+    await _log_manual_run(db, session_id, tool="create_interstitial",
+                          label="Create interstitial", result=result, t_before=t_before)
     return result

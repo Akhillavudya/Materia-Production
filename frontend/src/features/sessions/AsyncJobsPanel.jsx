@@ -73,16 +73,27 @@ export default function AsyncJobsPanel({ sessionId, refreshSignal }) {
     try { await cancelAsyncJob(id); await load() } catch { /* ignore */ }
   }
 
-  if (!sessionId || jobs.length === 0) return null
+  if (!sessionId) return null
 
   return (
-    <div style={{ padding: '10px 8px', borderBottom: '1px solid var(--border)' }}>
+    <div style={{ padding: '12px 10px' }}>
       <div style={{
         fontSize: 11, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase',
         color: 'var(--text-secondary)', padding: '0 6px 8px',
       }}>
         Simulations
       </div>
+
+      {jobs.length === 0 && (
+        <div style={{
+          padding: '18px 12px', textAlign: 'center', fontSize: 12,
+          color: 'var(--text-muted)', lineHeight: 1.5,
+        }}>
+          No simulations yet.<br />
+          Launch one from the <strong style={{ color: 'var(--text-secondary)' }}>Tools</strong> tab
+          and its live progress shows here.
+        </div>
+      )}
 
       {jobs.map((job) => {
         const cfg = STATUS[job.status] || STATUS.queued

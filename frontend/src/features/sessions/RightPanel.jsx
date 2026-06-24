@@ -17,8 +17,8 @@ export default function RightPanel({
   onManualRun,
   onOpenFile,
 }) {
-  // which tab is active — 'files' or 'jobs'. Controlled by App when provided so
-  // the sidebar's "Tools & Jobs" entry can jump straight here.
+  // which tab is active — 'files' | 'tools' | 'jobs'. Controlled by App when
+  // provided so the sidebar's "Tools & Jobs" entry can jump straight here.
   const [internalTab, setInternalTab] = useState('files')
   const activeTab = controlledTab ?? internalTab
   const setActiveTab = onTabChange ?? setInternalTab
@@ -72,7 +72,7 @@ export default function RightPanel({
         background: 'var(--bg-panel)',
         flexShrink: 0,
       }}>
-        {['files', 'jobs'].map(tab => (
+        {[['files', 'Files'], ['tools', 'Tools'], ['jobs', 'Jobs']].map(([tab, label]) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -94,29 +94,37 @@ export default function RightPanel({
               transition: 'all 0.15s ease',
             }}
           >
-            {tab === 'files' ? 'Files' : 'Tools & Jobs'}
+            {label}
           </button>
         ))}
       </div>
 
-      {/* ── tab content — only one visible at a time ── */}
+      {/* ── tab content — only one panel visible at a time ── */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-        {activeTab === 'files' ? (
+        {activeTab === 'files' && (
           <FilePanel
             sessionId={sessionId}
             refreshTrigger={filePanelRefresh + fileRefresh}
             onOpenFile={onOpenFile}
           />
-        ) : (
-          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
-            <AsyncJobsPanel sessionId={sessionId} refreshSignal={nebRefresh} />
-            <div style={{ flex: 1 }} />
+        )}
+
+        {/* Manual tools — laid out from the top, scrolls on overflow. */}
+        {activeTab === 'tools' && (
+          <div style={{ flex: 1, overflowY: 'auto' }}>
             <ToolLaunchPanel
               sessionId={sessionId}
-              onLaunched={() => setNebRefresh((n) => n + 1)}
+              onLaunched={() => { setNebRefresh((n) => n + 1); setActiveTab('jobs') }}
               onManualRun={() => { setNebRefresh((n) => n + 1); setFileRefresh((n) => n + 1); onManualRun?.() }}
               onUploaded={() => setFileRefresh((n) => n + 1)}
             />
+          </div>
+        )}
+
+        {/* Live jobs — own panel, polls and shows progress. */}
+        {activeTab === 'jobs' && (
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            <AsyncJobsPanel sessionId={sessionId} refreshSignal={nebRefresh} />
           </div>
         )}
       </div>

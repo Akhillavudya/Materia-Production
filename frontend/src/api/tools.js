@@ -59,3 +59,34 @@ export const launchAddAdsorbate = (sessionId, file, params) =>
 
 export const launchConvertStructure = (sessionId, file, params) =>
   launch(sessionId, 'convert_structure', file, params, 'Failed to convert structure')
+
+// ── VASP-input + defect tools (instant, return a tool-card envelope) ──
+export const launchGenerateVaspInputs = (sessionId, file, params) =>
+  launch(sessionId, 'generate_vasp_inputs', file, params, 'Failed to generate VASP inputs')
+
+export const launchGeneratePoscar = (sessionId, file, params) =>
+  launch(sessionId, 'generate_poscar', file, params, 'Failed to generate POSCAR')
+
+export const launchGenerateKpoints = (sessionId, file, params) =>
+  launch(sessionId, 'generate_kpoints', file, params, 'Failed to generate KPOINTS')
+
+export const launchCreateVacancy = (sessionId, file, params) =>
+  launch(sessionId, 'create_vacancy', file, params, 'Failed to create vacancy')
+
+export const launchCreateSubstitution = (sessionId, file, params) =>
+  launch(sessionId, 'create_substitution', file, params, 'Failed to create substitution')
+
+export const launchCreateInterstitial = (sessionId, file, params) =>
+  launch(sessionId, 'create_interstitial', file, params, 'Failed to create interstitial')
+
+/**
+ * Fetch the locally-available ML-potential models grouped by family
+ * ({ models: { mace: [{name, exists}], mattersim: [...] }, available }).
+ * Powers the Model dropdown in the tool launcher so only present checkpoints
+ * are offered.
+ */
+export async function fetchCalculators() {
+  const res = await authRequest('/calculators')
+  if (!res.ok) throw new Error(await readError(res, 'Failed to load models'))
+  return res.json()
+}

@@ -1,6 +1,70 @@
 import { downloadFile } from '../../api'
 
-export default function FileCard({ toolName, status, files, onOpen, manual }) {
+// Status pill palette for a launched async job shown inline in the chat.
+const JOB_STATUS = {
+  queued:    { label: 'Queued',    color: '#92400e', bg: '#fffbeb', border: '#fde68a' },
+  running:   { label: 'Running',   color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe' },
+  succeeded: { label: 'Succeeded', color: '#166534', bg: '#ecfdf3', border: '#bbf7d0' },
+  success:   { label: 'Succeeded', color: '#166534', bg: '#ecfdf3', border: '#bbf7d0' },
+  failed:    { label: 'Failed',    color: '#b91c1c', bg: '#fef2f2', border: '#fecaca' },
+  cancelled: { label: 'Cancelled', color: '#6b7280', bg: '#f9fafb', border: '#e5e7eb' },
+}
+
+function JobCard({ toolName, label, status, jobId, manual }) {
+  const cfg = JOB_STATUS[status] || JOB_STATUS.queued
+  return (
+    <div style={{
+      marginTop: '12px', background: 'var(--bg-elevated)',
+      border: '1px solid var(--border-light, #eceae4)', borderRadius: '14px',
+      padding: '14px 16px', maxWidth: '420px',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
+          <span style={{
+            fontSize: '12px', fontWeight: '600', color: 'var(--text-muted)',
+            letterSpacing: '0.05em', textTransform: 'uppercase',
+          }}>
+            {(label || toolName || 'job').replace(/_/g, ' ')}
+          </span>
+          {manual && (
+            <span style={{
+              fontSize: '9.5px', fontWeight: '600', letterSpacing: '0.04em', textTransform: 'uppercase',
+              color: 'var(--accent-blue, #2563eb)', background: 'var(--accent-blue-wash, #eff6ff)',
+              border: '1px solid #bfdbfe', borderRadius: '999px', padding: '1px 7px', flexShrink: 0,
+            }}>
+              manual
+            </span>
+          )}
+        </span>
+        <span style={{
+          fontSize: '11px', padding: '3px 8px', borderRadius: '20px', fontWeight: '500',
+          background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}`,
+        }}>
+          {cfg.label}
+        </span>
+      </div>
+      <div style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+        Job <span style={{ fontFamily: 'var(--font-mono, monospace)', color: 'var(--text-primary)' }}>
+          {String(jobId).slice(0, 8)}
+        </span>{' '}
+        {status === 'succeeded' || status === 'success'
+          ? <>finished — see results in the <strong>Jobs</strong> tab.</>
+          : status === 'failed'
+            ? <>failed — open the <strong>Jobs</strong> tab for details.</>
+            : status === 'cancelled'
+              ? <>was cancelled.</>
+              : <>running — track live progress in the <strong>Jobs</strong> tab.</>}
+      </div>
+    </div>
+  )
+}
+
+export default function FileCard({ toolName, label, status, files, onOpen, manual, jobId }) {
+  // An async-job launch (optimize / MD / phonons / …) carries a jobId and writes
+  // no files at enqueue time — show a job card instead of nothing.
+  if (jobId) {
+    return <JobCard toolName={toolName} label={label} status={status} jobId={jobId} manual={manual} />
+  }
   if (!files || files.length === 0) return null
 
   const ok = status === 'success'

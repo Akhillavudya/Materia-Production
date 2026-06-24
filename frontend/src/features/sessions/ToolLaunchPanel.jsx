@@ -12,10 +12,12 @@
 import { useEffect, useState } from 'react'
 import { TOOL_FORMS } from './toolForms'
 import {
-  uploadFiles, fetchSessionFilesGrouped,
+  uploadFiles, fetchSessionFilesGrouped, fetchCalculators,
   launchOptimize, launchMd, launchPhonons, launchElastic, launchSqs, launchNeb,
   launchMakeSupercell, launchAddVacuum, launchMakeSlab, launchAddAdsorbate,
   launchConvertStructure,
+  launchGenerateVaspInputs, launchGeneratePoscar, launchGenerateKpoints,
+  launchCreateVacancy, launchCreateSubstitution, launchCreateInterstitial,
 } from '../../api'
 
 // ── visual tokens (theme palette for this panel) ──
@@ -37,6 +39,11 @@ const LAUNCHERS = {
   make_supercell: launchMakeSupercell, add_vacuum: launchAddVacuum,
   make_slab: launchMakeSlab, add_adsorbate: launchAddAdsorbate,
   convert_structure: launchConvertStructure,
+  // instant VASP-input + defect tools
+  generate_vasp_inputs: launchGenerateVaspInputs,
+  generate_poscar: launchGeneratePoscar, generate_kpoints: launchGenerateKpoints,
+  create_vacancy: launchCreateVacancy, create_substitution: launchCreateSubstitution,
+  create_interstitial: launchCreateInterstitial,
 }
 
 // ── inline Tabler-style outline icons (dependency-free) ──
@@ -53,6 +60,13 @@ const ICON_PATHS = {
   slab: ['M3 8 h18', 'M3 12 h18', 'M3 16 h18'],
   adsorbate: ['M4 19 h16', 'M12 5 v6', 'M9 8 l3 3 l3 -3'],
   convert: ['M7 7 h10 l-3 -3', 'M17 17 h-10 l3 3'],
+  // VASP-input + defect tools
+  vasp: ['M5 4 h11 l3 3 v13 h-14 Z', 'M16 4 v3 h3', 'M8 12 h8', 'M8 16 h8'],
+  poscar: ['M6 4 h9 l3 3 v13 h-12 Z', 'M15 4 v3 h3', 'M8 13 l2 2 l4 -4'],
+  kpoints: ['M4 4 h16 v16 h-16 Z', 'M4 12 h16', 'M12 4 v16'],
+  vacancy: ['M5 5 h14 v14 h-14 Z', 'M9 9 l6 6', 'M15 9 l-6 6'],
+  substitution: ['M4 8 a4 4 0 0 1 8 0 a4 4 0 0 0 8 0', 'M8 8 v0.01', 'M16 8 v0.01'],
+  interstitial: ['M5 5 h14 v14 h-14 Z', 'M12 9 v6', 'M9 12 h6'],
 }
 const GRAIN_DOTS = [[6, 6], [12, 5], [18, 7], [5, 12], [12, 12], [19, 12], [7, 18], [13, 18], [18, 17]]
 
@@ -157,7 +171,10 @@ function initialValues(spec) {
   return v
 }
 
-function ToolCard({ sessionId, spec, isOpen, onToggle, onLaunched, onManualRun }) {
+// Family default model name, shown as the first "default" dropdown option.
+const FAMILY_DEFAULT = { mace: 'mace-mp-0b3-medium', mattersim: 'mattersim-v1.0.0-1M' }
+
+function ToolCard({ sessionId, spec, models, isOpen, onToggle, onLaunched, onManualRun }) {
   const [file, setFile] = useState(null)
   const [initial, setInitial] = useState(null)
   const [final, setFinal] = useState(null)
@@ -200,7 +217,10 @@ function ToolCard({ sessionId, spec, isOpen, onToggle, onLaunched, onManualRun }
       // tracked above. An instant tool returns its result straight into chat.
       if (res.job_id) {
         const id = res.job_id.slice(0, 8)
-        setMsg({ kind: 'ok', text: `Job started (${id}). Tracking above.` })
+        setMsg({ kind: 'ok', text: `Job started (${id}). See the Jobs tab.` })
+        // Refresh the chat (the launch posts a "job started" card there) AND
+        // switch to the Jobs tab for live progress.
+        onManualRun?.()
         onLaunched?.()
       } else {
         setMsg({ kind: 'ok', text: '✓ Done — added to the chat.' })
@@ -284,14 +304,23 @@ function ToolCard({ sessionId, spec, isOpen, onToggle, onLaunched, onManualRun }
             }}>
               <label style={{ fontSize: 10.5, color: T.tealDeep, display: 'flex', flexDirection: 'column', gap: 3, fontFamily: FONT_BODY, fontWeight: 600 }}>
                 Potential
-                <select value={calcType} onChange={(e) => setCalcType(e.target.value)} style={inputBox}>
+                <select
+                  value={calcType}
+                  onChange={(e) => { setCalcType(e.target.value); setCalcModel('') }}
+                  style={inputBox}
+                >
                   <option value="mace">MACE</option>
                   <option value="mattersim">MatterSim</option>
                 </select>
               </label>
               <label style={{ fontSize: 10.5, color: T.tealDeep, display: 'flex', flexDirection: 'column', gap: 3, fontFamily: FONT_BODY, fontWeight: 600 }}>
                 Model
-                <input type="text" value={calcModel} placeholder="default" onChange={(e) => setCalcModel(e.target.value)} style={inputBox} />
+                <select value={calcModel} onChange={(e) => setCalcModel(e.target.value)} style={inputBox}>
+                  <option value="">default ({FAMILY_DEFAULT[calcType] || 'auto'})</option>
+                  {(models?.[calcType] || [])
+                    .filter((m) => m.exists)
+                    .map((m) => <option key={m.name} value={m.name}>{m.name}</option>)}
+                </select>
               </label>
             </div>
           )}
@@ -371,6 +400,16 @@ export default function ToolLaunchPanel({ sessionId, onLaunched, onManualRun, on
   const [openKey, setOpenKey] = useState(null)
   const [detectedName, setDetectedName] = useState(null)
   const [uploadedName, setUploadedName] = useState(null)
+  const [models, setModels] = useState(null)
+
+  // Load the locally-available ML-potential models once, for the Model dropdown.
+  useEffect(() => {
+    let alive = true
+    fetchCalculators()
+      .then((data) => { if (alive) setModels(data.models || null) })
+      .catch(() => { if (alive) setModels(null) })
+    return () => { alive = false }
+  }, [])
 
   // Detect the active structure on mount / session change.
   useEffect(() => {
@@ -391,7 +430,7 @@ export default function ToolLaunchPanel({ sessionId, onLaunched, onManualRun, on
 
   return (
     <div style={{
-      borderTop: `1px solid ${T.border}`, flexShrink: 0, background: T.bg,
+      background: T.bg,
       padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 11,
     }}>
       {/* section header + active structure */}
@@ -420,6 +459,7 @@ export default function ToolLaunchPanel({ sessionId, onLaunched, onManualRun, on
             key={spec.key}
             sessionId={sessionId}
             spec={spec}
+            models={models}
             isOpen={openKey === spec.key}
             onToggle={toggle}
             onLaunched={onLaunched}

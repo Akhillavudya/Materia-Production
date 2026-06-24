@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect } from 'react'
-import { streamChat } from '../../api'
+import { useState, useRef, useEffect, useMemo } from 'react'
+import { streamChat, listAsyncJobs } from '../../api'
 import FileCard    from '../files/FileCard'
 import PlanCard    from './PlanCard'
 import ToolStatus  from './ToolStatus'
@@ -140,6 +140,46 @@ export default function Chat({
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
+  // ── live status for in-chat job cards ─────────────────────────────────────
+  // A launched job card is persisted with status "queued". We poll /api/jobs and
+  // keep a jobId→job map; the cards DERIVE their pill from it at render time.
+  // Because this updates a SEPARATE state (not `messages`), the auto-scroll
+  // effect above never fires — so a running job can't disturb scrolling, typing,
+  // or streaming.
+  const [jobsById, setJobsById] = useState({})
+
+  const jobCardIds = useMemo(() => {
+    const ids = []
+    for (const m of messages) for (const c of (m.toolCards || [])) if (c.jobId) ids.push(c.jobId)
+    return ids
+  }, [messages])
+  const jobCardIdsRef = useRef(jobCardIds)
+  useEffect(() => { jobCardIdsRef.current = jobCardIds }, [jobCardIds])
+
+  const hasJobCards = jobCardIds.length > 0
+  useEffect(() => {
+    if (!sessionId || !hasJobCards) return
+    const TERMINAL = new Set(['succeeded', 'failed', 'cancelled'])
+    let stopped = false
+    let timer = null
+    const tick = async () => {
+      let jobs = []
+      try { jobs = await listAsyncJobs(sessionId) } catch { /* non-critical */ }
+      if (stopped) return
+      if (jobs.length) {
+        const map = {}
+        for (const j of jobs) map[j.id] = j
+        setJobsById(prev => ({ ...prev, ...map }))
+        const active = jobCardIdsRef.current.some(id => !TERMINAL.has(map[id]?.status))
+        timer = window.setTimeout(tick, active ? 3000 : 15000)
+      } else {
+        timer = window.setTimeout(tick, 15000)
+      }
+    }
+    tick()
+    return () => { stopped = true; if (timer) window.clearTimeout(timer) }
+  }, [sessionId, hasJobCards])
+
 
   useEffect(() => {
     mountedRef.current = true
@@ -246,6 +286,7 @@ export default function Chat({
                   label:    fileData.label  || last.activeToolName,
                   status:   fileData.status || 'success',
                   files:    fileData.files  || [],
+                  jobId:    fileData.job_id,
                 },
               ]
             : [
@@ -255,6 +296,7 @@ export default function Chat({
                   label:    fileData.label,
                   status:   fileData.status,
                   files:    fileData.files || [],
+                  jobId:    fileData.job_id,
                 },
               ],
           activeToolName: null,   // spinner is done
@@ -760,9 +802,10 @@ export default function Chat({
                             <FileCard
                               toolName={card.toolName}
                               label={card.label}
-                              status={card.status}
+                              status={card.jobId ? (jobsById[card.jobId]?.status || card.status) : card.status}
                               files={card.files}
                               manual={card.manual}
+                              jobId={card.jobId}
                               onOpen={onOpenFile}
                             />
                           )}

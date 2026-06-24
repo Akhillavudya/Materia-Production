@@ -8,14 +8,18 @@ throttled progress writes. The `jobs` table remains the single source of truth.
 
 from __future__ import annotations
 
+import json
+import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from app.core.config import settings
-from app.database.models import Job
+from app.database.models import Job, Message
 from app.domain.jobs import JobStatus
+
+logger = logging.getLogger(__name__)
 
 # A sqlite sync engine must allow cross-thread use; Postgres needs no special args.
 _connect_args = (
@@ -119,6 +123,7 @@ def mark_succeeded(job_id: str, result: dict, artifacts: list[dict]) -> None:
             job.result = result
             job.artifacts = artifacts
             job.finished_at = _now()
+            _sync_chat_card(s, job, JobStatus.SUCCEEDED.value)
             s.commit()
 
 
@@ -133,6 +138,7 @@ def mark_cancelled(job_id: str, result: dict | None = None,
             if artifacts is not None:
                 job.artifacts = artifacts
             job.finished_at = _now()
+            _sync_chat_card(s, job, JobStatus.CANCELLED.value)
             s.commit()
 
 
@@ -143,4 +149,41 @@ def mark_failed(job_id: str, error: str) -> None:
             job.status = JobStatus.FAILED.value
             job.error = error[:4000]
             job.finished_at = _now()
+            _sync_chat_card(s, job, JobStatus.FAILED.value)
             s.commit()
+
+
+def _sync_chat_card(s, job: Job, status: str) -> None:
+    """Rewrite the persisted chat 'job card' status for a finished job.
+
+    A manual async-launch writes an assistant message whose ``tool_result`` card
+    carries this ``job_id`` with status "queued" (see api/upload._log_manual_run).
+    The live UI overlays real status by polling, but on a fresh page reload the
+    DB is the source of truth — so reflect the terminal status here too. Runs in
+    the SAME transaction as the status change; best-effort (never fail the job
+    over a card update).
+    """
+    try:
+        rows = s.execute(
+            select(Message).where(
+                Message.session_id == job.session_id,
+                Message.tool_result.isnot(None),
+                Message.tool_result.like(f"%{job.id}%"),
+            )
+        ).scalars().all()
+        for msg in rows:
+            try:
+                cards = json.loads(msg.tool_result)
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(cards, list):
+                continue
+            changed = False
+            for c in cards:
+                if isinstance(c, dict) and c.get("job_id") == job.id:
+                    c["status"] = status
+                    changed = True
+            if changed:
+                msg.tool_result = json.dumps(cards)
+    except Exception:  # noqa: BLE001 — never let a card update break job finalize
+        logger.exception("Failed to sync chat job card for %s", job.id)

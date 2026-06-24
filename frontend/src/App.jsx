@@ -185,9 +185,9 @@ export default function App() {
     else setSidebarCollapsed(false)
   }
 
-  // jump straight to the manual Tools & Jobs panel
+  // jump straight to the manual Tools panel (the launcher; Jobs is its own tab)
   function handleOpenTools() {
-    setRightTab('jobs')
+    setRightTab('tools')
     setDrawerOpen(false)
     if (isMobile) setPanelOpen(true)
   }
