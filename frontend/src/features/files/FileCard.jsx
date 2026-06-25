@@ -2,12 +2,12 @@ import { downloadFile } from '../../api'
 
 // Status pill palette for a launched async job shown inline in the chat.
 const JOB_STATUS = {
-  queued:    { label: 'Queued',    color: '#92400e', bg: '#fffbeb', border: '#fde68a' },
-  running:   { label: 'Running',   color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe' },
-  succeeded: { label: 'Succeeded', color: '#166534', bg: '#ecfdf3', border: '#bbf7d0' },
-  success:   { label: 'Succeeded', color: '#166534', bg: '#ecfdf3', border: '#bbf7d0' },
-  failed:    { label: 'Failed',    color: '#b91c1c', bg: '#fef2f2', border: '#fecaca' },
-  cancelled: { label: 'Cancelled', color: '#6b7280', bg: '#f9fafb', border: '#e5e7eb' },
+  queued:    { label: 'Queued',    color: 'var(--status-queued-fg)',  bg: 'var(--status-queued-bg)',  border: 'var(--status-queued-bd)' },
+  running:   { label: 'Running',   color: 'var(--status-running-fg)', bg: 'var(--status-running-bg)', border: 'var(--status-running-bd)' },
+  succeeded: { label: 'Succeeded', color: 'var(--status-ok-fg)',      bg: 'var(--status-ok-bg)',      border: 'var(--status-ok-bd)' },
+  success:   { label: 'Succeeded', color: 'var(--status-ok-fg)',      bg: 'var(--status-ok-bg)',      border: 'var(--status-ok-bd)' },
+  failed:    { label: 'Failed',    color: 'var(--status-fail-fg)',    bg: 'var(--status-fail-bg)',    border: 'var(--status-fail-bd)' },
+  cancelled: { label: 'Cancelled', color: 'var(--status-neutral-fg)', bg: 'var(--status-neutral-bg)', border: 'var(--status-neutral-bd)' },
 }
 
 function JobCard({ toolName, label, status, jobId, manual }) {
@@ -29,8 +29,8 @@ function JobCard({ toolName, label, status, jobId, manual }) {
           {manual && (
             <span style={{
               fontSize: '9.5px', fontWeight: '600', letterSpacing: '0.04em', textTransform: 'uppercase',
-              color: 'var(--accent-blue, #2563eb)', background: 'var(--accent-blue-wash, #eff6ff)',
-              border: '1px solid #bfdbfe', borderRadius: '999px', padding: '1px 7px', flexShrink: 0,
+              color: 'var(--accent-blue-dark)', background: 'var(--accent-blue-wash)',
+              border: '1px solid var(--accent-blue-border)', borderRadius: '999px', padding: '1px 7px', flexShrink: 0,
             }}>
               manual
             </span>
@@ -107,9 +107,9 @@ export default function FileCard({ toolName, label, status, files, onOpen, manua
                 fontWeight: '600',
                 letterSpacing: '0.04em',
                 textTransform: 'uppercase',
-                color: 'var(--accent-blue, #2563eb)',
-                background: 'var(--accent-blue-wash, #eff6ff)',
-                border: '1px solid #bfdbfe',
+                color: 'var(--accent-blue-dark)',
+                background: 'var(--accent-blue-wash)',
+                border: '1px solid var(--accent-blue-border)',
                 borderRadius: '999px',
                 padding: '1px 7px',
                 flexShrink: 0,
@@ -126,8 +126,8 @@ export default function FileCard({ toolName, label, status, files, onOpen, manua
             padding: '3px 8px',
             borderRadius: '20px',
             fontWeight: '500',
-            background: ok ? '#ecfdf3' : '#fef2f2',
-            color: ok ? '#166534' : '#b91c1c',
+            background: ok ? 'var(--status-ok-bg)' : 'var(--status-fail-bg)',
+            color: ok ? 'var(--status-ok-fg)' : 'var(--status-fail-fg)',
           }}
         >
           {ok ? `✓ ${files.length} file${files.length !== 1 ? 's' : ''}` : 'error'}
@@ -150,8 +150,8 @@ export default function FileCard({ toolName, label, status, files, onOpen, manua
               width: '32px',
               height: '32px',
               borderRadius: '8px',
-              background: '#eff6ff',
-              border: '1px solid #bfdbfe',
+              background: 'var(--accent-blue-wash)',
+              border: '1px solid var(--accent-blue-border)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -211,7 +211,7 @@ export default function FileCard({ toolName, label, status, files, onOpen, manua
             title={`Download ${file.name}`}
             onMouseEnter={(e) => {
               e.currentTarget.style.background = 'var(--hover-bg)'
-              e.currentTarget.style.borderColor = '#d1cec7'
+              e.currentTarget.style.borderColor = 'var(--text-muted)'
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.background = 'transparent'

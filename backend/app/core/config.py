@@ -61,6 +61,14 @@ class Settings(BaseModel):
     access_token_expire_minutes: int = 1440
     field_encryption_key: str = ""
 
+    # ── Google sign-in (OAuth via Google Identity Services) ──────────────────
+    # The OAuth 2.0 *Web* client ID from Google Cloud Console. When set, the UI
+    # shows a working "Continue with Google" button: the browser obtains a Google
+    # ID token which the backend verifies against this client ID before issuing a
+    # Materia session. Left unset → the Google button stays disabled (email/password
+    # still works). This is a public value; safe to expose to the frontend.
+    google_client_id: str | None = None
+
     # ── Signup gating (Step 5 — invite-only lab access) ──────────────────────
     # signup_mode: "open"   — anyone may register (dev default)
     #              "invite" — registration requires a code from `invite_codes`
@@ -245,6 +253,7 @@ def get_settings() -> Settings:
         jwt_algorithm=os.getenv("JWT_ALGORITHM", "HS256"),
         access_token_expire_minutes=int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440")),
         field_encryption_key=os.getenv("FIELD_ENCRYPTION_KEY", ""),
+        google_client_id=(os.getenv("GOOGLE_CLIENT_ID") or "").strip() or None,
         allowed_origins=_split_origins(
             os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000")
         ),

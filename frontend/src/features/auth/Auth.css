@@ -135,6 +135,14 @@
 }
 .auth-oauth:hover { background: var(--a-bg); border-color: #d4dddb; }
 
+/* Container for the official Google Identity Services button. */
+.auth-gbtn {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  min-height: 44px;
+}
+
 .auth-divider {
   display: flex;
   align-items: center;

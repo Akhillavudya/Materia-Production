@@ -38,9 +38,9 @@ const PROVIDERS = [
 ]
 
 const LEVEL = {
-  required:    { label: 'Required',    bg: '#fef3f2', fg: '#b42318', bd: '#fecdca' },
-  recommended: { label: 'Recommended', bg: 'var(--accent-blue)', fg: 'var(--accent-blue-dark)', bd: '#bfdbfe' },
-  optional:    { label: 'Optional',    bg: '#f4f3f0', fg: '#777', bd: 'var(--border)' },
+  required:    { label: 'Required',    bg: 'var(--status-fail-bg)', fg: 'var(--danger-fg)', bd: 'var(--status-fail-bd)' },
+  recommended: { label: 'Recommended', bg: 'var(--accent-blue)', fg: 'var(--accent-blue-dark)', bd: 'var(--accent-blue-border)' },
+  optional:    { label: 'Optional',    bg: 'var(--hover-bg)', fg: 'var(--text-muted)', bd: 'var(--border)' },
 }
 
 export default function SettingsPanel({ onClose }) {
@@ -194,7 +194,7 @@ function ProviderCard({ p, isSet, loading, onChanged }) {
       {/* get-key + mini steps */}
       <div style={s.getRow}>
         <a href={p.url} target="_blank" rel="noreferrer" style={s.getBtn}
-          onMouseEnter={(e) => e.currentTarget.style.background = '#cfe0fd'}
+          onMouseEnter={(e) => e.currentTarget.style.background = 'var(--accent-blue-border)'}
           onMouseLeave={(e) => e.currentTarget.style.background = 'var(--accent-blue)'}>
           ↗ Get API Key
         </a>
@@ -269,11 +269,11 @@ const s = {
   body: { padding: '16px 22px 24px', display: 'flex', flexDirection: 'column', gap: '14px' },
 
   onboard: {
-    background: 'var(--accent-blue)', border: '1px solid #bfdbfe',
+    background: 'var(--accent-blue)', border: '1px solid var(--accent-blue-border)',
     borderRadius: 'var(--radius-md)', padding: '13px 16px',
   },
   onboardTitle: { fontSize: '13px', fontWeight: 600, color: 'var(--accent-blue-dark)', marginBottom: '6px' },
-  onboardList: { margin: 0, paddingLeft: '18px', fontSize: '12.5px', color: '#1e40af', lineHeight: 1.7 },
+  onboardList: { margin: 0, paddingLeft: '18px', fontSize: '12.5px', color: 'var(--accent-blue-dark)', lineHeight: 1.7 },
 
   howCard: { border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', background: 'var(--bg-sidebar)' },
   howToggle: {
@@ -294,22 +294,22 @@ const s = {
     fontSize: '10.5px', fontWeight: 600, padding: '2px 9px', borderRadius: '20px',
     border: '1px solid', letterSpacing: '0.02em',
   },
-  badgeOn: { marginLeft: 'auto', fontSize: '11.5px', fontWeight: 600, color: '#067647' },
+  badgeOn: { marginLeft: 'auto', fontSize: '11.5px', fontWeight: 600, color: 'var(--status-ok-fg)' },
   badgeOff: { marginLeft: 'auto', fontSize: '11.5px', color: 'var(--text-muted)' },
 
   purpose: { fontSize: '12.5px', color: 'var(--text-secondary)', margin: '8px 0 6px', lineHeight: 1.5 },
   emptyHint: {
-    fontSize: '12px', color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a',
+    fontSize: '12px', color: 'var(--status-queued-fg)', background: 'var(--status-queued-bg)', border: '1px solid var(--status-queued-bd)',
     borderRadius: 'var(--radius-sm)', padding: '8px 11px', marginBottom: '10px', lineHeight: 1.5,
   },
-  setHint: { fontSize: '12px', color: '#067647', marginBottom: '10px' },
+  setHint: { fontSize: '12px', color: 'var(--status-ok-fg)', marginBottom: '10px' },
 
   getRow: { display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginBottom: '10px' },
   getBtn: {
     display: 'inline-flex', alignItems: 'center', gap: '5px', textDecoration: 'none',
     background: 'var(--accent-blue)', color: 'var(--accent-blue-dark)', fontWeight: 600,
     fontSize: '12px', padding: '6px 12px', borderRadius: 'var(--radius-sm)',
-    border: '1px solid #bfdbfe', whiteSpace: 'nowrap', transition: 'background 0.12s',
+    border: '1px solid var(--accent-blue-border)', whiteSpace: 'nowrap', transition: 'background 0.12s',
   },
   miniSteps: { fontSize: '11px', color: 'var(--text-muted)' },
 
@@ -327,17 +327,17 @@ const s = {
   },
   saveBtn: (disabled) => ({
     padding: '9px 18px', borderRadius: 'var(--radius-sm)',
-    background: disabled ? 'var(--bg-sidebar)' : 'var(--accent-blue-dark)',
-    border: `1px solid ${disabled ? 'var(--border)' : 'var(--accent-blue-dark)'}`,
-    color: disabled ? 'var(--text-muted)' : '#ffffff',
+    background: disabled ? 'var(--bg-sidebar)' : 'var(--accent-solid)',
+    border: `1px solid ${disabled ? 'var(--border)' : 'var(--accent-solid)'}`,
+    color: disabled ? 'var(--text-muted)' : 'var(--accent-solid-fg)',
     fontSize: '13px', fontWeight: 500, cursor: disabled ? 'not-allowed' : 'pointer',
     whiteSpace: 'nowrap', fontFamily: 'var(--font)', transition: 'all 0.12s',
   }),
   removeBtn: {
     padding: '9px 14px', borderRadius: 'var(--radius-sm)', background: 'none',
-    border: '1px solid #fecdca', color: '#b42318', fontSize: '13px', cursor: 'pointer',
+    border: '1px solid var(--status-fail-bd)', color: 'var(--danger-fg)', fontSize: '13px', cursor: 'pointer',
     whiteSpace: 'nowrap', fontFamily: 'var(--font)',
   },
-  okMsg: { fontSize: '12px', color: '#067647', marginTop: '9px' },
-  errMsg: { fontSize: '12px', color: '#b42318', marginTop: '9px' },
+  okMsg: { fontSize: '12px', color: 'var(--status-ok-fg)', marginTop: '9px' },
+  errMsg: { fontSize: '12px', color: 'var(--danger-fg)', marginTop: '9px' },
 }

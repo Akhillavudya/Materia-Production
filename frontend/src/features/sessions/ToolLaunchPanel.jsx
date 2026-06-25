@@ -21,11 +21,14 @@ import {
 } from '../../api'
 
 // ── visual tokens (theme palette for this panel) ──
+// All theme-dependent colors come from the global CSS variables so the panel
+// follows light/dark mode. Teal stays the brand accent in both themes.
 const T = {
-  bg: '#FAFAF8', surface: '#FFFFFF',
-  ink: '#10221F', inkSoft: '#5C6864', inkFaint: '#8B9591',
-  border: '#E6E4DD',
-  teal: '#00B4A6', tealDeep: '#007F76', tealWash: '#E6F8F5',
+  bg: 'var(--bg-panel)', surface: 'var(--bg-elevated)',
+  ink: 'var(--text-primary)', inkSoft: 'var(--text-secondary)', inkFaint: 'var(--text-muted)',
+  border: 'var(--border)',
+  teal: 'var(--teal)', tealDeep: 'var(--teal-deep)', tealWash: 'var(--teal-wash)',
+  tealBorder: 'var(--teal-border)',
 }
 const FONT_DISPLAY = '"DM Sans", Inter, ui-sans-serif, system-ui, sans-serif'
 const FONT_BODY = 'Inter, ui-sans-serif, system-ui, sans-serif'
@@ -137,7 +140,21 @@ const inputBox = {
   fontSize: 12, fontFamily: FONT_MONO, color: T.ink, background: T.surface, width: '100%',
 }
 
-function Field({ spec, value, onChange }) {
+function Field({ spec, value, values, onChange }) {
+  // `options` may be a function of the current values (e.g. thermostat choices
+  // depend on the selected ensemble). Default to [] so non-select fields
+  // (text/number/checkbox) don't blow up the dependency expression below.
+  const options = (typeof spec.options === 'function' ? spec.options(values) : spec.options) || []
+
+  // When the valid option set changes (e.g. ensemble nvt→npt), an out-of-range
+  // value would silently submit an invalid combo — snap it back to the first
+  // valid option instead.
+  useEffect(() => {
+    if (spec.type !== 'select' || !options?.length) return
+    if (!options.some(([v]) => v === value)) onChange(options[0][0])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [options.map(([v]) => v).join('|')])
+
   if (spec.type === 'checkbox') {
     return (
       <label style={{ fontSize: 11, color: T.ink, display: 'flex', alignItems: 'center', gap: 6, fontFamily: FONT_BODY }}>
@@ -151,7 +168,7 @@ function Field({ spec, value, onChange }) {
       {spec.label}
       {spec.type === 'select' ? (
         <select value={value} onChange={(e) => onChange(e.target.value)} style={inputBox}>
-          {spec.options.map(([v, lbl]) => <option key={v} value={v}>{lbl}</option>)}
+          {options.map(([v, lbl]) => <option key={v} value={v}>{lbl}</option>)}
         </select>
       ) : spec.type === 'number' ? (
         <input type="number" value={value} min={spec.min} max={spec.max} step={spec.step}
@@ -287,19 +304,24 @@ function ToolCard({ sessionId, spec, models, isOpen, onToggle, onLaunched, onMan
             <FilePick label="Structure — uses active if empty" file={file} onPick={setFile} accent={spec.color} />
           )}
 
-          {/* param grid */}
-          {spec.fields.length > 0 && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 9, alignItems: 'end' }}>
-              {spec.fields.map((f) => (
-                <Field key={f.name} spec={f} value={values[f.name]} onChange={(v) => setField(f.name, v)} />
-              ))}
-            </div>
-          )}
+          {/* param grid — fields may be conditionally hidden via showIf(values) */}
+          {(() => {
+            const visible = spec.fields.filter((f) => !f.showIf || f.showIf(values))
+            if (visible.length === 0) return null
+            return (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 9, alignItems: 'end' }}>
+                {visible.map((f) => (
+                  <Field key={f.name} spec={f} value={values[f.name]} values={values}
+                    onChange={(v) => setField(f.name, v)} />
+                ))}
+              </div>
+            )
+          })()}
 
           {/* teal-tinted Potential row */}
           {spec.calculator && (
             <div style={{
-              background: T.tealWash, border: `1px solid ${T.teal}33`, borderRadius: 6,
+              background: T.tealWash, border: `1px solid ${T.tealBorder}`, borderRadius: 6,
               padding: '8px 9px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 9,
             }}>
               <label style={{ fontSize: 10.5, color: T.tealDeep, display: 'flex', flexDirection: 'column', gap: 3, fontFamily: FONT_BODY, fontWeight: 600 }}>

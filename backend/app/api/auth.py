@@ -1,5 +1,6 @@
-"""Authentication endpoints (signup, login, me)."""
+"""Authentication endpoints (signup, login, google, me)."""
 
+import logging
 import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -16,8 +17,16 @@ from app.core.security import (
 from app.database.db import get_db
 from app.database.models import User
 from app.repositories import user_repository
-from app.schemas.auth import LoginRequest, SignupRequest, TokenResponse, UserOut
+from app.schemas.auth import (
+    GoogleAuthRequest,
+    LoginRequest,
+    SignupRequest,
+    TokenResponse,
+    UpdateProfileRequest,
+    UserOut,
+)
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
@@ -105,15 +114,110 @@ async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends
     return _token_response(user)
 
 
+def _verify_google_credential(credential: str) -> dict:
+    """Verify a Google ID token and return its claims, or raise HTTPException.
+
+    Uses google-auth to check the signature against Google's public keys, the
+    audience (our GOOGLE_CLIENT_ID) and the issuer/expiry. We never trust the
+    token's contents until this passes.
+    """
+    if not settings.google_client_id:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Google sign-in is not configured on this server.",
+        )
+    try:
+        from google.auth.transport import requests as google_requests
+        from google.oauth2 import id_token as google_id_token
+
+        claims = google_id_token.verify_oauth2_token(
+            credential,
+            google_requests.Request(),
+            settings.google_client_id,
+        )
+    except ValueError as exc:
+        # Bad signature, wrong audience, expired, malformed — all surface here.
+        logger.warning("Google credential verification failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not verify Google sign-in. Please try again.",
+        ) from exc
+
+    if not claims.get("email"):
+        raise HTTPException(status_code=401, detail="Google account has no email.")
+    if claims.get("email_verified") is False:
+        raise HTTPException(
+            status_code=403,
+            detail="Your Google email is not verified. Verify it with Google first.",
+        )
+    return claims
+
+
+@router.post("/google", response_model=TokenResponse)
+@limiter.limit("10/minute")
+async def google_login(
+    request: Request,
+    body: GoogleAuthRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Sign in (or register) with a Google ID token.
+
+    Existing users are always signed in. A brand-new Google user is created only
+    when SIGNUP_MODE='open' — so an invite-only/closed production server still
+    requires the admin to provision accounts, matching email/password signup.
+    """
+    claims = _verify_google_credential(body.credential)
+    email = _normalize_email(claims["email"])
+
+    user = await user_repository.get_by_email(db, email)
+    if user is None:
+        if settings.signup_mode != "open":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="No account exists for this Google email. "
+                "Ask the administrator to create one.",
+            )
+        # New OAuth user: no password to log in with, so store an unusable random
+        # hash (keeps the NOT NULL column valid without a schema change).
+        user = await user_repository.create(
+            db,
+            email=email,
+            full_name=(claims.get("name") or "").strip() or None,
+            hashed_password=get_password_hash(secrets.token_urlsafe(32)),
+        )
+
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="User account is disabled")
+
+    return _token_response(user)
+
+
 @router.get("/config")
 async def auth_config():
-    """Public, unauthenticated hint so the signup UI can adapt to the gate.
+    """Public, unauthenticated hint so the auth UI can adapt to the gate.
 
-    Returns only the mode — never the invite codes themselves.
+    Returns only the signup mode and the *public* Google client ID (never the
+    invite codes or any secret).
     """
-    return {"signup_mode": settings.signup_mode}
+    return {
+        "signup_mode": settings.signup_mode,
+        "google_enabled": bool(settings.google_client_id),
+        "google_client_id": settings.google_client_id,
+    }
 
 
 @router.get("/me", response_model=UserOut)
 async def me(current_user: User = Depends(get_current_user)):
     return _user_out(current_user)
+
+
+@router.patch("/me", response_model=UserOut)
+async def update_me(
+    body: UpdateProfileRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update the signed-in user's editable profile fields (display name)."""
+    full_name = body.full_name.strip() if body.full_name else None
+    user = await user_repository.update(db, current_user, full_name=full_name or None)
+    return _user_out(user)

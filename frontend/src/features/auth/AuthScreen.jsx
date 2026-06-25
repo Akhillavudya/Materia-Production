@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
-import { getAuthConfig, login, signup } from '../../api'
+import { useEffect, useRef, useState } from 'react'
+import { getAuthConfig, googleLogin, login, signup } from '../../api'
 import Logo from '../../components/Logo'
+import { loadGoogleIdentity } from './googleIdentity'
 import './Auth.css'
 
 // Real, verifiable product capabilities (no fake stats / testimonials)
@@ -28,16 +29,71 @@ export default function AuthScreen({ onAuthenticated, initialError = null, onBac
   const [fullName, setFullName] = useState('')
   const [inviteCode, setInviteCode] = useState('')
   const [signupMode, setSignupMode] = useState('open')
+  const [googleClientId, setGoogleClientId] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(initialError)
   const [info, setInfo] = useState(null)
 
+  const googleBtnRef = useRef(null)
+  // Keep the latest auth handler in a ref so the GIS callback (registered once)
+  // always calls the current closure.
+  const onAuthRef = useRef(onAuthenticated)
+  useEffect(() => { onAuthRef.current = onAuthenticated }, [onAuthenticated])
+
   useEffect(() => { setError(initialError) }, [initialError])
 
-  // Ask the backend how signup is gated so we show the right fields.
+  // Ask the backend how signup is gated and whether Google sign-in is configured.
   useEffect(() => {
-    getAuthConfig().then(c => setSignupMode(c?.signup_mode || 'open')).catch(() => {})
+    getAuthConfig()
+      .then(c => {
+        setSignupMode(c?.signup_mode || 'open')
+        if (c?.google_enabled && c?.google_client_id) setGoogleClientId(c.google_client_id)
+      })
+      .catch(() => {})
   }, [])
+
+  // When Google is configured, load GIS and render the official button.
+  useEffect(() => {
+    if (!googleClientId || !googleBtnRef.current) return
+    let cancelled = false
+
+    async function handleCredential(response) {
+      if (!response?.credential) return
+      setError(null); setInfo(null); setLoading(true)
+      try {
+        const user = await googleLogin(response.credential)
+        onAuthRef.current?.(user)
+      } catch (err) {
+        setError(err.message || 'Could not sign in with Google')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadGoogleIdentity()
+      .then(google => {
+        if (cancelled || !googleBtnRef.current) return
+        google.accounts.id.initialize({
+          client_id: googleClientId,
+          callback: handleCredential,
+        })
+        googleBtnRef.current.innerHTML = ''
+        google.accounts.id.renderButton(googleBtnRef.current, {
+          type: 'standard',
+          theme: 'outline',
+          size: 'large',
+          shape: 'pill',
+          text: mode === 'signup' ? 'signup_with' : 'continue_with',
+          logo_alignment: 'center',
+          width: Math.min(Math.max(googleBtnRef.current.offsetWidth || 320, 200), 400),
+        })
+      })
+      .catch(() => {
+        if (!cancelled) setInfo('Google sign-in could not load. Please use your email below.')
+      })
+
+    return () => { cancelled = true }
+  }, [googleClientId, mode])
 
   function switchMode(next) {
     setMode(next)
@@ -45,10 +101,10 @@ export default function AuthScreen({ onAuthenticated, initialError = null, onBac
     setInfo(null)
   }
 
-  function handleGoogle() {
-    // Google OAuth is not wired on the backend yet — be honest, don't fake it.
+  function handleGoogleDisabled() {
+    // Shown only when GOOGLE_CLIENT_ID is not configured on the server.
     setError(null)
-    setInfo('Google sign-in is coming soon. For now, continue with your email below.')
+    setInfo('Google sign-in is not configured on this server. Continue with your email below.')
   }
 
   async function handleSubmit(e) {
@@ -113,10 +169,15 @@ export default function AuthScreen({ onAuthenticated, initialError = null, onBac
               : 'Sign in to your Materia account to continue your research.'}
           </p>
 
-          <button type="button" className="auth-oauth" onClick={handleGoogle}>
-            <GoogleIcon />
-            Continue with Google
-          </button>
+          {googleClientId ? (
+            // Official Google Identity Services button (renders into this div).
+            <div ref={googleBtnRef} className="auth-gbtn" />
+          ) : (
+            <button type="button" className="auth-oauth" onClick={handleGoogleDisabled}>
+              <GoogleIcon />
+              Continue with Google
+            </button>
+          )}
 
           <div className="auth-divider">OR</div>
 

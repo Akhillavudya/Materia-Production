@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
+import { Menu, Moon, Sun, FolderOpen, ArrowUp, Square, ChevronDown } from 'lucide-react'
 import { streamChat, listAsyncJobs } from '../../api'
 import FileCard    from '../files/FileCard'
 import PlanCard    from './PlanCard'
@@ -55,13 +56,6 @@ function AssistantMarkdown({ content }) {
     </ReactMarkdown>
   )
 }
-
-const SUGGESTIONS = [
-  'Generate POSCAR for NaCl',
-  'Run EOS calculation using CHGNet',
-  'Create a 2×2×2 supercell',
-  'Optimize crystal structure with MLP',
-]
 
 // ── helper: create a blank assistant message slot ─────────────────────────────
 function blankAssistant() {
@@ -546,7 +540,7 @@ export default function Chat({
     <div style={{
       display: 'flex', alignItems: 'flex-end', gap: '0',
       background: 'var(--bg-elevated)', border: '1px solid var(--border)',
-      borderRadius: 'var(--radius-xl)', padding: '10px 10px 10px 16px',
+      borderRadius: 'var(--radius-xl)', padding: '10px 12px',
       boxShadow: '0 2px 8px rgba(0,0,0,0.06)', transition: 'border-color 0.15s, box-shadow 0.15s',
     }}
     onFocusCapture={e => {
@@ -587,40 +581,18 @@ export default function Chat({
         disabled={!streaming && !canSend}
         title={streaming ? 'Stop generation' : 'Send message'}
         style={{
-        width: '34px', height: '34px', borderRadius: '50%',
-        background: streaming ? '#111827' : canSend ? '#6366f1' : 'var(--border)', border: 'none',
-        color: streaming || canSend ? '#ffffff' : 'var(--text-muted)',
+        width: '34px', height: '34px', borderRadius: '50%', marginLeft: '8px',
+        background: streaming ? 'var(--text-primary)' : canSend ? '#6366f1' : 'var(--border)', border: 'none',
+        color: streaming ? 'var(--bg-chat)' : canSend ? '#ffffff' : 'var(--text-muted)',
         cursor: streaming || canSend ? 'pointer' : 'not-allowed',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: streaming ? '10px' : '16px', flexShrink: 0, transition: 'all 0.15s',
+        flexShrink: 0, transition: 'all 0.15s',
         transform: streaming || canSend ? 'scale(1)' : 'scale(0.95)',
       }}>
-        {streaming ? '■' : '↑'}
+        {streaming
+          ? <Square size={13} strokeWidth={2} fill="currentColor" />
+          : <ArrowUp size={18} strokeWidth={2.25} />}
       </button>
-    </div>
-  )
-
-  const suggestionChips = (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'center' }}>
-      {SUGGESTIONS.map(chip => (
-        <button key={chip} onClick={() => sendMessage(chip)} style={{
-          padding: '10px 16px', minHeight: '40px', background: 'var(--bg-elevated)',
-          border: '1px solid var(--border)', borderRadius: '20px',
-          fontSize: '13px', color: 'var(--text-secondary)',
-          cursor: 'pointer', fontFamily: 'var(--font)', transition: 'all 0.15s',
-        }}
-        onMouseEnter={e => {
-          e.currentTarget.style.background = 'var(--hover-bg)'
-          e.currentTarget.style.borderColor = 'var(--text-muted)'
-          e.currentTarget.style.color = 'var(--text-primary)'
-        }}
-        onMouseLeave={e => {
-          e.currentTarget.style.background = 'var(--bg-elevated)'
-          e.currentTarget.style.borderColor = 'var(--border)'
-          e.currentTarget.style.color = 'var(--text-secondary)'
-        }}
-        >{chip}</button>
-      ))}
     </div>
   )
 
@@ -664,7 +636,7 @@ export default function Chat({
               onMouseEnter={e => e.currentTarget.style.background = 'var(--hover-bg)'}
               onMouseLeave={e => e.currentTarget.style.background = 'none'}
             >
-              ☰
+              <Menu size={18} strokeWidth={1.75} />
             </button>
           )}
           {showMenuButton && <LogoMark size={26} radius={7} />}
@@ -676,7 +648,7 @@ export default function Chat({
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {isMobile ? 'Materia' : 'Materials simulation assistant'}
             </span>
-            {!isMobile && <span style={{ color: 'var(--text-muted)', fontSize: '13px' }}>∨</span>}
+            {!isMobile && <ChevronDown size={15} strokeWidth={1.75} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />}
           </div>
         </div>
 
@@ -690,7 +662,9 @@ export default function Chat({
             onMouseEnter={e => e.currentTarget.style.background = 'var(--hover-bg)'}
             onMouseLeave={e => e.currentTarget.style.background = 'none'}
           >
-            {theme === 'dark' ? '☀' : '🌙'}
+            {theme === 'dark'
+              ? <Sun size={18} strokeWidth={1.75} />
+              : <Moon size={18} strokeWidth={1.75} />}
           </button>
 
           {/* files / outputs — opens the bottom sheet (mobile only) */}
@@ -703,7 +677,7 @@ export default function Chat({
               onMouseEnter={e => e.currentTarget.style.background = 'var(--hover-bg)'}
               onMouseLeave={e => e.currentTarget.style.background = 'none'}
             >
-              🗂
+              <FolderOpen size={18} strokeWidth={1.75} />
             </button>
           )}
         </div>
@@ -729,7 +703,6 @@ export default function Chat({
               </h1>
             </div>
             <div style={{ width: '100%' }}>{composer}</div>
-            <div style={{ marginTop: '20px' }}>{suggestionChips}</div>
           </div>
         )}
 
@@ -842,9 +815,9 @@ export default function Chat({
 
           {error && (
             <div style={{
-              padding: '10px 14px', background: '#fef2f2',
-              border: '1px solid #fecaca', borderRadius: 'var(--radius-md)',
-              fontSize: '13px', color: '#b91c1c',
+              padding: '10px 14px', background: 'var(--status-fail-bg)',
+              border: '1px solid var(--status-fail-bd)', borderRadius: 'var(--radius-md)',
+              fontSize: '13px', color: 'var(--status-fail-fg)',
             }}>⚠ {error}</div>
           )}
 

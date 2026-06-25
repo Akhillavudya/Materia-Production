@@ -13,11 +13,11 @@ import { listAsyncJobs, cancelAsyncJob } from '../../api'
 const ACTIVE = new Set(['queued', 'running'])
 
 const STATUS = {
-  queued:    { label: 'Queued',    color: '#92400e', bg: '#fffbeb', border: '#fde68a' },
-  running:   { label: 'Running',   color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe' },
-  succeeded: { label: 'Succeeded', color: '#166534', bg: '#ecfdf3', border: '#bbf7d0' },
-  failed:    { label: 'Failed',    color: '#b91c1c', bg: '#fef2f2', border: '#fecaca' },
-  cancelled: { label: 'Cancelled', color: '#6b7280', bg: '#f9fafb', border: '#e5e7eb' },
+  queued:    { label: 'Queued',    color: 'var(--status-queued-fg)',  bg: 'var(--status-queued-bg)',  border: 'var(--status-queued-bd)' },
+  running:   { label: 'Running',   color: 'var(--status-running-fg)', bg: 'var(--status-running-bg)', border: 'var(--status-running-bd)' },
+  succeeded: { label: 'Succeeded', color: 'var(--status-ok-fg)',      bg: 'var(--status-ok-bg)',      border: 'var(--status-ok-bd)' },
+  failed:    { label: 'Failed',    color: 'var(--status-fail-fg)',    bg: 'var(--status-fail-bg)',    border: 'var(--status-fail-bd)' },
+  cancelled: { label: 'Cancelled', color: 'var(--status-neutral-fg)', bg: 'var(--status-neutral-bg)', border: 'var(--status-neutral-bd)' },
 }
 
 const TYPE_LABEL = {
@@ -134,13 +134,13 @@ export default function AsyncJobsPanel({ sessionId, refreshSignal }) {
             )}
 
             {job.status === 'failed' && job.error && (
-              <div style={{ marginTop: 5, fontSize: 11, color: '#b91c1c', lineHeight: 1.4 }}>
+              <div style={{ marginTop: 5, fontSize: 11, color: 'var(--status-fail-fg)', lineHeight: 1.4 }}>
                 ⚠ {job.error}
               </div>
             )}
 
             {job.status === 'succeeded' && (
-              <div style={{ marginTop: 5, fontSize: 11, color: '#166534' }}>
+              <div style={{ marginTop: 5, fontSize: 11, color: 'var(--status-ok-fg)' }}>
                 {job.result?.final_energy != null ? `E = ${job.result.final_energy} eV · ` : ''}
                 {job.result?.barrier_forward_eV != null ? `barrier = ${job.result.barrier_forward_eV} eV · ` : ''}
                 {artifacts.length} file{artifacts.length !== 1 ? 's' : ''}

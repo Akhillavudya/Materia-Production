@@ -7,7 +7,7 @@ const T = {
   surface: 'var(--bg-elevated)',
   ink: 'var(--text-primary)', inkSoft: 'var(--text-secondary)', inkFaint: 'var(--text-muted)',
   border: 'var(--border)',
-  teal: '#00B4A6', tealDeep: '#0d9488', tealWash: 'var(--hover-bg)',
+  teal: 'var(--teal)', tealDeep: 'var(--teal-deep)', tealWash: 'var(--hover-bg)',
 }
 const FONT_MONO = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace'
 
@@ -257,7 +257,7 @@ export default function FilePanel({ sessionId, refreshTrigger, onOpenFile }) {
           </div>
         )}
 
-        {error && <div style={{ ...s.emptyState, color: '#b91c1c' }}>{error}</div>}
+        {error && <div style={{ ...s.emptyState, color: 'var(--status-fail-fg)' }}>{error}</div>}
 
         {groups.map((group, gi) => (
           <div key={gi} style={s.group}>

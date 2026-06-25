@@ -5,7 +5,11 @@ import RightPanel from './features/sessions/RightPanel'
 import AuthScreen from './features/auth/AuthScreen'
 import Landing from './features/landing/Landing'
 import SettingsPanel from './features/settings/SettingsPanel'
+import ThemePage from './features/settings/ThemePage'
+import EditProfile from './features/settings/EditProfile'
+import HelpPanel from './features/settings/HelpPanel'
 import FileViewer from './features/files/FileViewer'
+import StructureWorkspace from './features/viewer/StructureWorkspace'
 import { useIsMobile, useBodyScrollLock, useTheme } from './hooks/ui'
 import { fetchMessages, getAuthToken, getMe, getStoredUser, logout } from './api'
 
@@ -21,13 +25,20 @@ export default function App() {
   // logged-out view: 'landing' (marketing page) or 'auth' (sign in / sign up)
   const [authView, setAuthView] = useState('landing')
   const [showSettings, setShowSettings] = useState(false)
+  // dedicated Appearance/Theme page (opened from the sidebar's "Theme" item)
+  const [showTheme, setShowTheme] = useState(false)
+  // profile editor + help, opened from the sidebar profile menu
+  const [showProfile, setShowProfile] = useState(false)
+  const [showHelp, setShowHelp] = useState(false)
   // when set, a file is open full-width: { relPath, fileName }. Sidebar + right
   // panel hide so the viewer sits beside the chat (Claude-style focused view).
   const [viewingFile, setViewingFile] = useState(null)
+  // full-screen VESTA-style structure visualizer (opened from the sidebar)
+  const [showViewer, setShowViewer] = useState(false)
 
   // ── responsive + theme ──
   const isMobile = useIsMobile()
-  const { theme, toggleTheme } = useTheme()
+  const { theme, mode, setMode, toggleTheme } = useTheme()
   // mobile-only: sidebar drawer + files bottom-sheet open state
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [panelOpen, setPanelOpen] = useState(false)
@@ -205,11 +216,15 @@ export default function App() {
           activeSessionId={activeSessionId}
           onSelectSession={handleSelectSession}
           onNewChat={handleNewChat}
+          onOpenViewer={() => { setShowViewer(true); setDrawerOpen(false) }}
           user={user}
           onSignOut={handleSignOut}
           onOpenSettings={() => { setShowSettings(true); setDrawerOpen(false) }}
-          theme={theme}
-          onToggleTheme={toggleTheme}
+          onOpenProfile={() => { setShowProfile(true); setDrawerOpen(false) }}
+          onOpenHelp={() => { setShowHelp(true); setDrawerOpen(false) }}
+          mode={mode}
+          onOpenTheme={() => { setShowTheme(true); setDrawerOpen(false) }}
+          themeActive={showTheme}
         />
       )}
 
@@ -267,8 +282,35 @@ export default function App() {
         />
       ) : null}
 
+      {showViewer && (
+        <StructureWorkspace
+          sessionId={activeSessionId}
+          onClose={() => setShowViewer(false)}
+        />
+      )}
+
       {showSettings && (
         <SettingsPanel onClose={() => setShowSettings(false)} />
+      )}
+
+      {showTheme && (
+        <ThemePage
+          mode={mode}
+          onSelect={setMode}
+          onClose={() => setShowTheme(false)}
+        />
+      )}
+
+      {showProfile && (
+        <EditProfile
+          user={user}
+          onSaved={(updated) => setUser(updated)}
+          onClose={() => setShowProfile(false)}
+        />
+      )}
+
+      {showHelp && (
+        <HelpPanel onClose={() => setShowHelp(false)} />
       )}
     </div>
   )

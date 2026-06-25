@@ -37,6 +37,32 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def to_jsonable(value):
+    """Coerce NumPy scalars/arrays to plain Python types for JSON/JSONB writes.
+
+    Simulation calculators (notably MatterSim) return energies/forces as
+    ``np.float32``, which is not JSON-serialisable. Without this, writing a job's
+    ``progress``/``result`` to the JSONB column raises
+    ``TypeError: Object of type float32 is not JSON serializable`` and the job is
+    marked failed even though the simulation ran fine. Applied at every JSONB
+    write so any service's numpy leak is neutralised in one place.
+    """
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    # NumPy scalar (np.float32/np.int64/…) exposes .item() → native Python scalar.
+    item = getattr(value, "item", None)
+    if callable(item) and not isinstance(value, (dict, list, tuple)):
+        try:
+            return value.item()
+        except Exception:  # noqa: BLE001
+            pass
+    if isinstance(value, dict):
+        return {k: to_jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [to_jsonable(v) for v in value]
+    return value
+
+
 def create_job(
     *,
     job_id: str,
@@ -105,7 +131,7 @@ def update_progress(job_id: str, progress: dict) -> None:
     with _Session() as s:
         job = s.get(Job, job_id)
         if job:
-            job.progress = progress
+            job.progress = to_jsonable(progress)
             s.commit()
 
 
@@ -120,8 +146,8 @@ def mark_succeeded(job_id: str, result: dict, artifacts: list[dict]) -> None:
         job = s.get(Job, job_id)
         if job:
             job.status = JobStatus.SUCCEEDED.value
-            job.result = result
-            job.artifacts = artifacts
+            job.result = to_jsonable(result)
+            job.artifacts = to_jsonable(artifacts)
             job.finished_at = _now()
             _sync_chat_card(s, job, JobStatus.SUCCEEDED.value)
             s.commit()
@@ -134,9 +160,9 @@ def mark_cancelled(job_id: str, result: dict | None = None,
         if job:
             job.status = JobStatus.CANCELLED.value
             if result is not None:
-                job.result = result
+                job.result = to_jsonable(result)
             if artifacts is not None:
-                job.artifacts = artifacts
+                job.artifacts = to_jsonable(artifacts)
             job.finished_at = _now()
             _sync_chat_card(s, job, JobStatus.CANCELLED.value)
             s.commit()

@@ -236,7 +236,7 @@ const s = {
   pre: { margin: 0, padding: '14px 16px', whiteSpace: 'pre', overflowX: 'auto', flex: 1, color: 'var(--text-primary)' },
   codeLine: {},
   bigBtn: {
-    background: 'var(--accent-blue)', border: '1px solid #bfdbfe', color: 'var(--accent-blue-dark)',
+    background: 'var(--accent-blue)', border: '1px solid var(--accent-blue-border)', color: 'var(--accent-blue-dark)',
     borderRadius: 'var(--radius-sm)', fontSize: '13px', fontWeight: 600, cursor: 'pointer',
     padding: '9px 16px', fontFamily: 'var(--font)',
   },

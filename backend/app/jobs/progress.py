@@ -14,6 +14,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.domain.jobs import JobCancelled, JobStatus
 from app.jobs import store
+from app.jobs.store import to_jsonable
 
 logger = get_logger(__name__)
 
@@ -73,10 +74,14 @@ class ProgressReporter:
         self._last_phase = phase
 
         pct = round(100.0 * step / total, 1) if total else None
-        payload = {"step": step, "total": total, "pct": pct,
-                   "energy": energy, "fmax": fmax, "temperature": temperature,
-                   "phase": phase, "phase_index": phase_index,
-                   "phase_count": phase_count}
+        # to_jsonable: neutralise any NumPy scalar (e.g. MatterSim's np.float32
+        # energy) before it reaches the JSONB write and the SSE publish.
+        payload = to_jsonable({
+            "step": step, "total": total, "pct": pct,
+            "energy": energy, "fmax": fmax, "temperature": temperature,
+            "phase": phase, "phase_index": phase_index,
+            "phase_count": phase_count,
+        })
         store.update_progress(self.job_id, payload)
         self.publish({"type": "progress", **payload})
 

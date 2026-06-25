@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { fetchFileContent } from '../../api'
+import { load3Dmol } from './threeDmol'
 
 const s = {
   overlay: {
@@ -148,37 +149,6 @@ if (!document.getElementById('sv-styles')) {
   st.id = 'sv-styles'
   st.textContent = `@keyframes spin { to { transform: rotate(360deg) } }`
   document.head.appendChild(st)
-}
-
-// ── load 3Dmol.js from CDN once ───────────────────────────────────────────────
-let _3dmolLoaded  = false
-let _3dmolLoading = false
-let _3dmolCallbacks = []
-
-function load3Dmol() {
-  return new Promise((resolve, reject) => {
-    if (_3dmolLoaded) { resolve(window.$3Dmol); return }
-
-    _3dmolCallbacks.push({ resolve, reject })
-
-    if (_3dmolLoading) return
-    _3dmolLoading = true
-
-    const script = document.createElement('script')
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/3Dmol/2.1.0/3Dmol-min.js'
-    script.integrity = 'sha384-TxfnTy2TY3ms7kc3hVNjePx2ekn5oouyllBzqjsaZMmtran9oNs+yTKd0TY+x0eY'
-    script.crossOrigin = 'anonymous'
-    script.onload = () => {
-      _3dmolLoaded = true
-      _3dmolCallbacks.forEach(cb => cb.resolve(window.$3Dmol))
-      _3dmolCallbacks = []
-    }
-    script.onerror = () => {
-      _3dmolCallbacks.forEach(cb => cb.reject(new Error('Failed to load 3Dmol.js')))
-      _3dmolCallbacks = []
-    }
-    document.head.appendChild(script)
-  })
 }
 
 // ── 3Dmol style helper ───────────────────────────────────────────────────────

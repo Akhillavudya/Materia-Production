@@ -32,12 +32,13 @@ export default function ToolStatus({ toolName, status }) {
   const label = TOOL_LABELS[toolName] || toolName.replace(/_/g, ' ')
 
   // color config per status
+  const NEUTRAL = { bg: 'var(--status-neutral-bg)', color: 'var(--status-neutral-fg)', border: 'var(--status-neutral-bd)' }
   const cfg = {
-    running: { bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe' },
-    success: { bg: '#ecfdf3', color: '#166534', border: '#bbf7d0' },
-    error:   { bg: '#fef2f2', color: '#b91c1c', border: '#fecaca' },
-    canceled:{ bg: '#f8fafc', color: '#64748b', border: '#e2e8f0' },
-  }[status] || { bg: '#f8fafc', color: '#64748b', border: '#e2e8f0' }
+    running: { bg: 'var(--status-running-bg)', color: 'var(--status-running-fg)', border: 'var(--status-running-bd)' },
+    success: { bg: 'var(--status-ok-bg)', color: 'var(--status-ok-fg)', border: 'var(--status-ok-bd)' },
+    error:   { bg: 'var(--status-fail-bg)', color: 'var(--status-fail-fg)', border: 'var(--status-fail-bd)' },
+    canceled: NEUTRAL,
+  }[status] || NEUTRAL
 
   return (
     <div style={{

@@ -221,16 +221,29 @@ export const TOOL_FORMS = [
     category: 'Dynamics',
     color: '#378ADD',
     icon: 'md',
-    description: 'Evolve the structure at temperature with NVT/NPT dynamics.',
+    description: 'Evolve the structure at temperature with NVT/NPT/NVE dynamics.',
     endpoint: 'md',
     calculator: true,
     fields: [
       { name: 'ensemble', label: 'Ensemble', type: 'select', default: 'nvt',
-        options: [['nvt', 'nvt'], ['npt', 'npt']] },
+        options: [
+          ['nvt', 'NVT (const T)'],
+          ['npt', 'NPT (const T,P)'],
+          ['nve', 'NVE (microcanonical)'],
+        ] },
+      // Thermostat choices depend on the ensemble; NVE has none (pure energy
+      // conservation) so the field is hidden for it. Matches backend md.py.
+      { name: 'thermostat', label: 'Thermostat', type: 'select', default: 'langevin',
+        showIf: (v) => v.ensemble !== 'nve',
+        options: (v) => v.ensemble === 'npt'
+          ? [['berendsen', 'Berendsen'], ['bussi', 'Bussi (CSVR)']]
+          : [['langevin', 'Langevin'], ['nose-hoover', 'Nosé–Hoover']] },
       { name: 'temperature', label: 'Temp (K)', type: 'number', default: 300, min: 1 },
       { name: 'nsw', label: 'Steps', type: 'number', default: 2000, min: 1 },
       { name: 'timestep', label: 'Δt (fs)', type: 'number', default: 1.0, step: 0.1, min: 0.1 },
-      { name: 'pressure', label: 'Pressure (GPa)', type: 'number', default: 0.0, step: 0.1 },
+      // Pressure is only meaningful for NPT.
+      { name: 'pressure', label: 'Pressure (GPa)', type: 'number', default: 0.0, step: 0.1,
+        showIf: (v) => v.ensemble === 'npt' },
     ],
   },
   {

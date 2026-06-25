@@ -159,7 +159,9 @@ def run_optimization(
 
     def _record():
         try:
-            e    = opt_atoms.get_potential_energy()
+            # float(): MatterSim returns np.float32, which is not JSON/JSONB
+            # serialisable and would crash the progress / result DB write.
+            e    = float(opt_atoms.get_potential_energy())
             fmax_now = _get_fmax(opt_atoms)
             step = len(energy_log)
             energy_log.append({"step": step, "energy_eV": round(e, 6), "fmax_eV_A": round(fmax_now, 6)})

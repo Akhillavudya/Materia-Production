@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { Plus, Loader2, Check, AlertCircle } from 'lucide-react'
 import { uploadFiles, createSessionAndUpload } from '../../api'
 
 // ── which file types the browser file picker will accept ─────────────────────
@@ -64,18 +65,19 @@ export default function UploadButton({
 
   // style changes based on upload status
   const iconColor = {
-    null:        'var(--text-muted)',
-    uploading:   '#6366f1',
-    done:        '#166534',
-    error:       '#b91c1c',
+    null:        'var(--text-secondary)',
+    uploading:   'var(--accent-solid)',
+    done:        'var(--status-ok-fg)',
+    error:       'var(--status-fail-fg)',
   }[status]
 
-const icon = {
-  null: '📎',
-  uploading: '⏳',
-  done: '✔',
-  error: '⚠',
-}[status]
+  // Claude-style: a single clean "+" to attach files; swaps to a status glyph
+  const IconCmp = {
+    null:      Plus,
+    uploading: Loader2,
+    done:      Check,
+    error:     AlertCircle,
+  }[status]
 
   const title = {
     null:        'Upload POSCAR, CIF, INCAR, KPOINTS…',
@@ -96,30 +98,36 @@ const icon = {
         style={{ display: 'none' }}
       />
 
-      {/* visible button — matches the input area style */}
+      {/* visible button — clean circular "+" (Claude-style attach control) */}
       <button
         type="button"
         onClick={() => fileInputRef.current?.click()}
         disabled={disabled || status === 'uploading'}
         title={title}
         style={{
-          background: 'none',
-          border: 'none',
+          width: '34px',
+          height: '34px',
+          borderRadius: '50%',
+          background: 'transparent',
+          border: '1px solid var(--border)',
           color: iconColor,
           cursor: disabled || status === 'uploading' ? 'not-allowed' : 'pointer',
-          fontSize: status === 'uploading' ? '16px' : '20px',
-          padding: '4px 8px 4px 0',
           flexShrink: 0,
+          marginRight: '8px',
           lineHeight: 1,
-          transition: 'color 0.15s',
-          // spin animation while uploading
-          animation: status === 'uploading' ? 'spin 0.8s linear infinite' : 'none',
+          transition: 'background 0.15s, color 0.15s, border-color 0.15s',
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
         }}
+        onMouseEnter={e => { if (!disabled && status !== 'uploading') { e.currentTarget.style.background = 'var(--hover-bg)'; e.currentTarget.style.borderColor = 'var(--text-muted)' } }}
+        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'var(--border)' }}
       >
-        {icon}
+        <IconCmp
+          size={18}
+          strokeWidth={2}
+          style={{ animation: status === 'uploading' ? 'spin 0.8s linear infinite' : 'none' }}
+        />
       </button>
     </>
   )

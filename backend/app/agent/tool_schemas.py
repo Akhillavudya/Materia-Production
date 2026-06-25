@@ -17,14 +17,19 @@ from app.tools.contracts import (
     AddAdsorbateInput,
     AddVacuumInput,
     AnalyzeSymmetryInput,
+    ComputeElasticInput,
+    ComputeNebInput,
+    ComputePhononInput,
     ConvertStructureInput,
     CreateInterstitialInput,
     CreateSubstitutionInput,
     CreateVacancyInput,
     GenerateKpointsInput,
     GeneratePoscarInput,
+    GenerateSqsInput,
     GenerateVaspInputsInput,
     ListFilesInput,
+    ListMigrationPathsInput,
     ListModelsInput,
     MakeSlabInput,
     MakeSupercellInput,
@@ -159,6 +164,36 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
         "structure using a machine-learned potential. Long-running: returns a "
         "job_id immediately and runs in the background."
     ),
+    "compute_elastic_tensor": (
+        "Compute the elastic tensor and derived moduli (bulk/shear/Young's, "
+        "Poisson ratio) of a session structure with a machine-learned potential. "
+        "Long-running: returns a job_id and runs in the background."
+    ),
+    "compute_phonons": (
+        "Compute the phonon band structure / density of states of a session "
+        "structure (finite-displacement via phonopy) with a machine-learned "
+        "potential. Long-running: returns a job_id and runs in the background."
+    ),
+    "generate_sqs": (
+        "Generate a Special Quasi-random Structure (SQS) for a disordered alloy "
+        "using ATAT mcsqs. To turn an ORDERED structure into a disordered one, "
+        "pass `substitute` (e.g. \"Se->S:0.25\" = replace 25% of Se with S) — this "
+        "is the tool for requests like 'substitute 25% of Se with S using SQS'. "
+        "Operates on the active/most-recent session structure. Long-running: "
+        "returns a job_id and runs in the background."
+    ),
+    "list_migration_paths": (
+        "List candidate ion migration hops (source/dest site pairs) for a given "
+        "element in a session structure, so the user can pick one for compute_neb. "
+        "Use this before compute_neb when the hop is not yet specified."
+    ),
+    "compute_neb": (
+        "Run a Nudged Elastic Band (NEB) calculation of a migration barrier "
+        "between two endpoints with a machine-learned potential. Provide either a "
+        "final_poscar_name or source_site/dest_site labels (from "
+        "list_migration_paths). Long-running: returns a job_id and runs in the "
+        "background."
+    ),
 }
 
 # (tool name, contract model)
@@ -181,6 +216,11 @@ _TOOL_MODELS: list[tuple[str, type[BaseModel]]] = [
     ("list_models", ListModelsInput),
     ("optimize_structure", OptimizeStructureInput),
     ("run_md_simulation", RunMdSimulationInput),
+    ("compute_elastic_tensor", ComputeElasticInput),
+    ("compute_phonons", ComputePhononInput),
+    ("generate_sqs", GenerateSqsInput),
+    ("list_migration_paths", ListMigrationPathsInput),
+    ("compute_neb", ComputeNebInput),
 ]
 
 

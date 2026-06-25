@@ -25,6 +25,22 @@ from app.agent.providers.base import ToolCall
 from app.agent.tool_schemas import TOOL_SPECS
 from app.agent.tool_registry import CALLABLE_TOOL_MAP, TOOL_MAP
 from app.core.context import set_request_identity
+
+# Drift guard: every executable tool must also be declared to the LLM (and vice
+# versa). When these lists fall out of sync the model can "see" a tool name but
+# lacks its argument schema, then improvises bad args and silently fails (this is
+# exactly how generate_sqs/phonon/elastic/neb broke — see docs/issues_solve/
+# 2026-06-25). Fail fast at import instead of debugging it from a transcript.
+_declared = {s.name for s in TOOL_SPECS}
+_executable = set(CALLABLE_TOOL_MAP)
+if _declared != _executable:
+    raise RuntimeError(
+        "Agent tool registries are out of sync — declared-to-LLM vs executable.\n"
+        f"  executable but NOT declared: {sorted(_executable - _declared)}\n"
+        f"  declared but NOT executable: {sorted(_declared - _executable)}\n"
+        "Update app/agent/tool_schemas.py (_TOOL_MODELS) and/or "
+        "app/agent/tool_registry.py (_TOOL_SPECS) so both list the same tools."
+    )
 from app.core.logging import get_logger
 from app.services.storage.file_service import (
     get_session_dir,

@@ -38,6 +38,17 @@ export async function login(email, password) {
   return setAuthSession(await res.json())
 }
 
+// Exchange a Google Identity Services credential (ID token) for a Materia session.
+export async function googleLogin(credential) {
+  const res = await fetch(`${API}/auth/google`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ credential }),
+  })
+  if (!res.ok) throw new Error(await readError(res, 'Could not sign in with Google'))
+  return setAuthSession(await res.json())
+}
+
 export async function getMe() {
   const res = await authRequest('/auth/me')
   if (!res.ok) throw new Error(await readError(res, 'Could not load user'))
@@ -47,3 +58,16 @@ export async function getMe() {
 }
 
 export const fetchMe = getMe
+
+// Update the signed-in user's editable profile fields (display name).
+export async function updateProfile({ fullName }) {
+  const res = await authRequest('/auth/me', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ full_name: fullName }),
+  })
+  if (!res.ok) throw new Error(await readError(res, 'Could not save profile'))
+  const user = await res.json()
+  localStorage.setItem('materia_user', JSON.stringify(user))
+  return user
+}

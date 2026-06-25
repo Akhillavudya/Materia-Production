@@ -180,8 +180,9 @@ def run_md(
         step    = len(energy_log) * log_interval
         time_fs = step * timestep
         try:
-            e   = atoms.get_potential_energy()
-            T   = atoms.get_temperature()
+            # float(): MatterSim returns np.float32, not JSON/JSONB serialisable.
+            e   = float(atoms.get_potential_energy())
+            T   = float(atoms.get_temperature())
         except Exception:
             e, T = float("nan"), float("nan")
 

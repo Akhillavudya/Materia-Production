@@ -30,3 +30,11 @@ async def create(
     await db.commit()
     await db.refresh(user)
     return user
+
+
+async def update(db: AsyncSession, user: User, *, full_name: str | None) -> User:
+    """Patch editable profile fields on an existing user row."""
+    user.full_name = full_name
+    await db.commit()
+    await db.refresh(user)
+    return user

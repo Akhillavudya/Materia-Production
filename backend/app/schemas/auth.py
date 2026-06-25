@@ -16,6 +16,17 @@ class LoginRequest(BaseModel):
     password: str = Field(..., min_length=1, max_length=128)
 
 
+class GoogleAuthRequest(BaseModel):
+    # The ID token (a JWT "credential") issued by Google Identity Services in the
+    # browser. Verified server-side against GOOGLE_CLIENT_ID.
+    credential: str = Field(..., min_length=10, max_length=4096)
+
+
+class UpdateProfileRequest(BaseModel):
+    # Display name shown around the app. Empty string clears it back to null.
+    full_name: str | None = Field(default=None, max_length=255)
+
+
 class UserOut(BaseModel):
     id: int
     email: str

@@ -16,10 +16,33 @@
 
   --accent-blue:    #dbeafe;
   --accent-blue-dark: #1d4ed8;
+  --accent-blue-wash: #eff6ff;
+  --accent-blue-border: #bfdbfe;
+  /* solid, always-readable action button (white text on both themes) */
+  --accent-solid:   #1d4ed8;
+  --accent-solid-fg: #ffffff;
   --hover-bg:       #f0ede6;
 
   --code-bg:        #0f172a;
   --code-fg:        #e5e7eb;
+
+  /* markdown surfaces (tables, formulas) */
+  --th-bg:          #f1f5f9;
+  --katex-bg:       #fafaf9;
+
+  /* brand teal (tool launcher) */
+  --teal:           #00b4a6;
+  --teal-deep:      #0d9488;
+  --teal-wash:      #e6f8f5;
+  --teal-border:    rgba(0, 180, 166, 0.28);
+
+  /* semantic status tints (jobs, files, tool runs) */
+  --status-queued-fg:  #92400e; --status-queued-bg:  #fffbeb; --status-queued-bd:  #fde68a;
+  --status-running-fg: #1d4ed8; --status-running-bg: #eff6ff; --status-running-bd: #bfdbfe;
+  --status-ok-fg:      #166534; --status-ok-bg:      #ecfdf3; --status-ok-bd:      #bbf7d0;
+  --status-fail-fg:    #b91c1c; --status-fail-bg:    #fef2f2; --status-fail-bd:    #fecaca;
+  --status-neutral-fg: #6b7280; --status-neutral-bg: #f9fafb; --status-neutral-bd: #e5e7eb;
+  --danger-fg:         #b42318;
 
   --sidebar-width:  270px;
   --panel-width:    340px;
@@ -52,10 +75,33 @@
 
   --accent-blue:    #1e3a5f;
   --accent-blue-dark: #93c5fd;
+  --accent-blue-wash: rgba(59, 130, 246, 0.14);
+  --accent-blue-border: rgba(59, 130, 246, 0.32);
+  /* solid, always-readable action button (white text on both themes) */
+  --accent-solid:   #2563eb;
+  --accent-solid-fg: #ffffff;
   --hover-bg:       #2a2b2f;
 
   --code-bg:        #0b1020;
   --code-fg:        #e5e7eb;
+
+  /* markdown surfaces (tables, formulas) */
+  --th-bg:          #2a2b31;
+  --katex-bg:       #202024;
+
+  /* brand teal (tool launcher) */
+  --teal:           #2dd4bf;
+  --teal-deep:      #5eead4;
+  --teal-wash:      rgba(45, 212, 191, 0.10);
+  --teal-border:    rgba(45, 212, 191, 0.30);
+
+  /* semantic status tints (jobs, files, tool runs) */
+  --status-queued-fg:  #fbbf24; --status-queued-bg:  rgba(251, 191, 36, 0.13); --status-queued-bd:  rgba(251, 191, 36, 0.32);
+  --status-running-fg: #93c5fd; --status-running-bg: rgba(59, 130, 246, 0.14); --status-running-bd: rgba(59, 130, 246, 0.34);
+  --status-ok-fg:      #6ee7b7; --status-ok-bg:      rgba(16, 185, 129, 0.14); --status-ok-bd:      rgba(16, 185, 129, 0.32);
+  --status-fail-fg:    #fca5a5; --status-fail-bg:    rgba(239, 68, 68, 0.14);  --status-fail-bd:    rgba(239, 68, 68, 0.34);
+  --status-neutral-fg: #9ca3af; --status-neutral-bg: rgba(148, 163, 184, 0.10); --status-neutral-bd: rgba(148, 163, 184, 0.26);
+  --danger-fg:         #fca5a5;
 
   color-scheme: dark;
 }
@@ -133,7 +179,7 @@ button { -webkit-tap-highlight-color: transparent; }
 .assistant-markdown {
   width: 100%;
   max-width: 72ch;
-  color: #1f2328;
+  color: var(--text-primary);
   font-size: 15.5px;
   line-height: 1.72;
   letter-spacing: -0.003em;
@@ -160,7 +206,7 @@ button { -webkit-tap-highlight-color: transparent; }
 .assistant-markdown h2,
 .assistant-markdown h3,
 .assistant-markdown h4 {
-  color: #0d1117;
+  color: var(--text-primary);
   font-weight: 650;
   line-height: 1.3;
   letter-spacing: -0.018em;
@@ -239,17 +285,6 @@ button { -webkit-tap-highlight-color: transparent; }
   text-underline-offset: 2px;
 }
 
-/* keep headings/quote/katex legible in dark mode */
-.assistant-markdown,
-.assistant-markdown h1,
-.assistant-markdown h2,
-.assistant-markdown h3,
-.assistant-markdown h4 { color: var(--text-primary); }
-.assistant-markdown .katex,
-.assistant-markdown .katex-display .katex { color: var(--text-primary); }
-.assistant-markdown th { background: var(--hover-bg); }
-.assistant-markdown .katex-display { background: var(--bg-page); }
-
 .assistant-markdown table {
   width: 100%;
   margin: 1rem 0;
@@ -268,8 +303,13 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 
 .assistant-markdown th {
-  background: #f8fafc;
+  background: var(--th-bg);
+  color: var(--text-primary);
   font-weight: 650;
+}
+
+.assistant-markdown td {
+  color: var(--text-primary);
 }
 
 .assistant-markdown hr {
@@ -280,7 +320,7 @@ button { -webkit-tap-highlight-color: transparent; }
 
 .assistant-markdown .katex {
   font-size: 1.12em;
-  color: #0d1117;
+  color: var(--text-primary);
 }
 
 .assistant-markdown .katex-display {
@@ -290,7 +330,7 @@ button { -webkit-tap-highlight-color: transparent; }
   overflow-y: hidden;
   border: 1px solid var(--border-light);
   border-radius: var(--radius-md);
-  background: #fafaf9;
+  background: var(--katex-bg);
   line-height: 1.5;
 }
 

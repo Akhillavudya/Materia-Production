@@ -265,13 +265,14 @@ async def launch_md(
     temperature: float = Form(300.0),
     nsw: int = Form(2000),
     timestep: float = Form(1.0),
+    thermostat: str = Form("langevin"),
     pressure: float = Form(0.0),
     calculator_type: str = Form("mace"),
     calculator_model: str | None = Form(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Launch a molecular-dynamics (NVT/NPT) job from the UI tool panel."""
+    """Launch a molecular-dynamics (NVT/NPT/NVE) job from the UI tool panel."""
     await get_session_for_user(session_id, current_user, db)
     name = await _store_optional(session_id, structure)
     t_before = time.time()
@@ -282,6 +283,7 @@ async def launch_md(
         temperature=float(temperature),
         nsw=int(nsw),
         timestep=float(timestep),
+        thermostat=thermostat,
         pressure=float(pressure),
         calculator_type=calculator_type,
         calculator_model=calculator_model or None,
