@@ -1,9 +1,21 @@
 # Materia — Pre-Deployment Validation Plan
 
-**Status:** In progress — **T1 ✅ + T2 ✅ + T3 ✅ done; T4 🟡 Gemini complete (100%), Groq partial** (2026-06-25); T5 pending
+**Status:** **T1 ✅ + T2 ✅ + T3 ✅ + T5 ✅ done; T4 🟡 Gemini complete (100%), Groq partial** (2026-06-25). All five tiers run; only T4-Groq full pass remains (free daily token cap).
 **Created:** 2026-06-25
 
 **Progress log:**
+- 2026-06-25 — T5 (performance / scaling, SUPPORTING): timed one energy+forces evaluation
+  per (model, size) across an 8 → **1024-atom** Si supercell sweep, **all 6 potentials × 8
+  sizes = 48 measurements, no failures**, on an RTX A4000 (CUDA). Median of 7 forced
+  recomputes after 3 warm-ups, geometry fixed, cache bypassed, CUDA-synchronised.
+  **Asymptotic scaling is near-linear:** MACE models ~N^0.93, MatterSim N^0.83–0.89
+  (sub-linear — still gaining GPU utilisation as cells grow), vs DFT's ~O(N³). **Throughput
+  leader: MatterSim-1M ~9.8k atoms/s at 1024 atoms** (MACE ~3.7k). Small systems (<64 atoms)
+  are overhead-bound (flat ~14–22 ms floor), not compute-bound. Peak GPU memory is the real
+  ceiling (≈3.8–4.9 GB at 1024 atoms). `speedup vs DFT` column is an explicitly-labelled
+  order-of-magnitude *estimate* (t_DFT ≈ 6e-5·N³ s, anchored ~60 s @ 100 atoms — Materia
+  runs no DFT). Harness `backend/scripts/validation/t5_performance.py`; results +
+  scaling/throughput plots in `docs/validation_results/T5_performance.{md,csv}` + `T5_*.png`.
 - 2026-06-25 — T4 (agent reliability, DIFFERENTIATOR): 39-prompt benchmark across 7
   categories (single / multi / structure / compute / ambiguous / out-of-scope /
   conceptual), graded single-turn on the **first** tool the model calls (no jobs
