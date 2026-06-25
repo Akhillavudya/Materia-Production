@@ -80,8 +80,11 @@ def _to_tools(tools: list[ToolSpec]) -> list[dict]:
 class GroqProvider(LLMProvider):
     name = "groq"
 
-    def __init__(self, model: str | None = None):
+    def __init__(self, model: str | None = None, max_retries: int = 3):
         self.model = model or settings.groq_model
+        # Default 3: the SDK smooths over free-tier per-minute bursts in
+        # production. Benchmarks/key-rotation can set 0 to fail fast on 429.
+        self.max_retries = max_retries
 
     async def run(
         self,
@@ -102,7 +105,7 @@ class GroqProvider(LLMProvider):
         # max_retries: the SDK retries transient 429/5xx with exponential backoff and
         # honours the server's Retry-After header, smoothing over free-tier per-minute
         # bursts before the agent falls back to the next provider.
-        client = AsyncGroq(api_key=key, max_retries=3)
+        client = AsyncGroq(api_key=key, max_retries=self.max_retries)
 
         text_acc: list[str] = []
         # Streamed tool calls arrive as deltas keyed by index; the name lands in

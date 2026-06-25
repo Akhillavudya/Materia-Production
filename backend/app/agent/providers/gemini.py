@@ -109,6 +109,14 @@ class GeminiProvider(LLMProvider):
             temperature=0.0,
             automatic_function_calling=types.AutomaticFunctionCallingConfig(
                 disable=True),
+            # Disable "thinking". gemini-2.5-flash thinks by default, and with our
+            # tool set present it routinely spends the whole turn thinking and
+            # returns finish_reason=STOP with NO content (empty parts) — no text,
+            # no function call. That made Gemini a dead fallback (always empty →
+            # straight through to Ollama) and broke tool calling outright when it
+            # was primary. thinking_budget=0 makes it emit the function call / text
+            # directly (also lower latency). See docs/issues_solve/2026-06-25-*.
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
         )
 
         text_acc: list[str] = []

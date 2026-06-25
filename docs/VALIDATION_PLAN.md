@@ -1,9 +1,25 @@
 # Materia — Pre-Deployment Validation Plan
 
-**Status:** In progress — **T1 ✅ + T2 ✅ + T3 ✅ done** (2026-06-25); T4/T5 pending
+**Status:** In progress — **T1 ✅ + T2 ✅ + T3 ✅ done; T4 🟡 Gemini complete (100%), Groq partial** (2026-06-25); T5 pending
 **Created:** 2026-06-25
 
 **Progress log:**
+- 2026-06-25 — T4 (agent reliability, DIFFERENTIATOR): 39-prompt benchmark across 7
+  categories (single / multi / structure / compute / ambiguous / out-of-scope /
+  conceptual), graded single-turn on the **first** tool the model calls (no jobs
+  executed). **Gemini (gemini-2.5-flash): 37/39 cases ran, 37/37 = 100% tool-selection
+  AND 100% argument accuracy** — incl. correct search-first sequencing and correct
+  no-tool refusal/clarification. 2 conceptual cases unreached (per-minute quota);
+  near-certain passes. **Groq (llama-3.3-70b): partial — free DAILY token cap** (~8 k
+  tokens/call × 23 schemas → ~12 calls/day/key); 9-case pilot shows clean
+  single/compute/structure selection but skips the search-first rule (M1) and doesn't
+  clarify ambiguous prompts (A1); full pass deferred to daily-quota reset. **Real bug
+  found + fixed:** gemini-2.5-flash "thinking" default returned empty turns (no text/no
+  tool call) → dead fallback provider; fixed with `thinking_budget=0`
+  (`docs/issues_solve/2026-06-25-gemini-thinking-empty-tool-calls.md`). Harness
+  `backend/scripts/validation/t4_agent_reliability.py` (multi-account key rotation +
+  per-minute wait-retry) + suite `t4_prompt_suite.py`; results in
+  `docs/validation_results/T4_agent_reliability.{md,csv}`.
 - 2026-06-25 — T1 (ML-potential accuracy, HEADLINE): **6 models × 10 materials = 60
   relaxations, all converged.** Mean |volume deviation| = **2.65%**, mean |bulk-modulus
   error| = **8.3%** vs Materials Project DFT. Best geometry: mace-omat (2.38%); best
