@@ -11,6 +11,7 @@
 
 import { useEffect, useState } from 'react'
 import { TOOL_FORMS } from './toolForms'
+import { getAuthConfig } from '../../api/auth'
 import {
   uploadFiles, fetchSessionFilesGrouped, fetchCalculators,
   launchOptimize, launchMd, launchPhonons, launchElastic, launchSqs, launchNeb,
@@ -19,6 +20,12 @@ import {
   launchGenerateVaspInputs, launchGeneratePoscar, launchGenerateKpoints,
   launchCreateVacancy, launchCreateSubstitution, launchCreateInterstitial,
 } from '../../api'
+
+// Shown when a heavy simulation card is run on the lite web edition. The tool
+// stays visible; this just routes the user to the desktop app (Deployment Part A).
+const DESKTOP_ONLY_MSG =
+  'This simulation runs on your machine, not in the web app. Install the Materia ' +
+  'desktop app to run it on your own CPU/GPU — every simulation tool is included there.'
 
 // ── visual tokens (theme palette for this panel) ──
 // All theme-dependent colors come from the global CSS variables so the panel
@@ -191,7 +198,7 @@ function initialValues(spec) {
 // Family default model name, shown as the first "default" dropdown option.
 const FAMILY_DEFAULT = { mace: 'mace-mp-0b3-medium', mattersim: 'mattersim-v1.0.0-1M' }
 
-function ToolCard({ sessionId, spec, models, isOpen, onToggle, onLaunched, onManualRun }) {
+function ToolCard({ sessionId, spec, models, heavyEnabled, isOpen, onToggle, onLaunched, onManualRun }) {
   const [file, setFile] = useState(null)
   const [initial, setInitial] = useState(null)
   const [final, setFinal] = useState(null)
@@ -201,10 +208,17 @@ function ToolCard({ sessionId, spec, models, isOpen, onToggle, onLaunched, onMan
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null)
 
+  // Heavy ML-potential tools can't run on the lite web server. Keep the card
+  // visible but route Run to the desktop app instead of launching a job.
+  const heavyLocked = !!spec.heavy && !heavyEnabled
+
   const setField = (name, val) => setValues((p) => ({ ...p, [name]: val }))
 
   const run = async () => {
     setMsg(null)
+    if (heavyLocked) {
+      setMsg({ kind: 'err', text: DESKTOP_ONLY_MSG }); return
+    }
     if (spec.twoFiles && (!initial || !final)) {
       setMsg({ kind: 'err', text: 'Pick both an initial and a final structure.' }); return
     }
@@ -278,6 +292,15 @@ function ToolCard({ sessionId, spec, models, isOpen, onToggle, onLaunched, onMan
             }}>
               {spec.category}
             </span>
+            {heavyLocked && (
+              <span style={{
+                fontFamily: FONT_BODY, fontSize: 9.5, fontWeight: 600, letterSpacing: '0.03em',
+                textTransform: 'uppercase', color: T.inkSoft,
+                background: 'var(--border)', borderRadius: 999, padding: '2px 7px',
+              }}>
+                Desktop app
+              </span>
+            )}
           </span>
           {!isOpen && (
             <span style={{
@@ -353,11 +376,12 @@ function ToolCard({ sessionId, spec, models, isOpen, onToggle, onLaunched, onMan
             disabled={busy}
             style={{
               padding: '9px 0', borderRadius: 6, border: 'none', cursor: busy ? 'default' : 'pointer',
-              background: busy ? '#9ca3af' : T.teal, color: '#fff', fontSize: 12.5, fontWeight: 600,
+              background: busy ? '#9ca3af' : heavyLocked ? 'var(--text-muted)' : T.teal,
+              color: '#fff', fontSize: 12.5, fontWeight: 600,
               fontFamily: FONT_DISPLAY,
             }}
           >
-            {busy ? 'Starting…' : `Run ${spec.label}`}
+            {busy ? 'Starting…' : heavyLocked ? 'Available in desktop app' : `Run ${spec.label}`}
           </button>
 
           {msg && (
@@ -423,6 +447,9 @@ export default function ToolLaunchPanel({ sessionId, onLaunched, onManualRun, on
   const [detectedName, setDetectedName] = useState(null)
   const [uploadedName, setUploadedName] = useState(null)
   const [models, setModels] = useState(null)
+  // Whether the heavy ML-potential tools run on this server (web=false). Default
+  // true so a failed/slow config fetch never wrongly locks the cards.
+  const [heavyEnabled, setHeavyEnabled] = useState(true)
 
   // Load the locally-available ML-potential models once, for the Model dropdown.
   useEffect(() => {
@@ -430,6 +457,15 @@ export default function ToolLaunchPanel({ sessionId, onLaunched, onManualRun, on
     fetchCalculators()
       .then((data) => { if (alive) setModels(data.models || null) })
       .catch(() => { if (alive) setModels(null) })
+    return () => { alive = false }
+  }, [])
+
+  // Is this the lite web edition (heavy tools gated) or full desktop/dev?
+  useEffect(() => {
+    let alive = true
+    getAuthConfig()
+      .then((cfg) => { if (alive) setHeavyEnabled(cfg.heavy_tools_enabled !== false) })
+      .catch(() => { if (alive) setHeavyEnabled(true) })
     return () => { alive = false }
   }, [])
 
@@ -482,6 +518,7 @@ export default function ToolLaunchPanel({ sessionId, onLaunched, onManualRun, on
             sessionId={sessionId}
             spec={spec}
             models={models}
+            heavyEnabled={heavyEnabled}
             isOpen={openKey === spec.key}
             onToggle={toggle}
             onLaunched={onLaunched}

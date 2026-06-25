@@ -25,6 +25,14 @@ def _split_csv(raw: str) -> list[str]:
     return [item.strip() for item in (raw or "").split(",") if item.strip()]
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    """Parse a boolean env var. Accepts 1/true/yes/on (any case); unset → default."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 # Secrets that must never be used in production — placeholders / known defaults.
 _WEAK_SECRETS = {"", "my-super-secret-key", "change-me-to-a-long-random-secret",
                  "changeme", "secret", "dev", "test"}
@@ -91,6 +99,17 @@ class Settings(BaseModel):
     # still boots for dev without a running Postgres.
     database_url_env: str | None = None
     db_path: str = "materia.db"
+
+    # ── Heavy-tools gate (Deployment Part A) ─────────────────────────────────
+    # The 6 ML-potential tools (optimize / MD / elastic / phonon / NEB / SQS) and
+    # the add_adsorbate relax path load torch + MACE/MatterSim through the Celery
+    # worker. On the free shared web server they are turned OFF
+    # (ENABLE_HEAVY_TOOLS=false) so one click can't exhaust it: every job-starting
+    # path then returns a friendly "run this in the desktop app" message instead.
+    # The tools stay VISIBLE everywhere — only their execution is gated. The
+    # desktop app (user's own CPU/GPU) leaves this ON. Default ON so dev/desktop
+    # work out of the box.
+    enable_heavy_tools: bool = True
 
     # ── Job system (redesign §11) ────────────────────────────────────────────
     redis_url: str = "redis://localhost:6379/0"
@@ -269,6 +288,7 @@ def get_settings() -> Settings:
         ),
         database_url_env=os.getenv("DATABASE_URL"),
         db_path=os.getenv("DB_PATH", "materia.db"),
+        enable_heavy_tools=_env_bool("ENABLE_HEAVY_TOOLS", True),
         redis_url=os.getenv("REDIS_URL", "redis://localhost:6379/0"),
         job_backend=os.getenv("JOB_BACKEND", "celery"),
         max_job_wallclock_s=int(os.getenv("MAX_JOB_WALLCLOCK_S", "86400")),

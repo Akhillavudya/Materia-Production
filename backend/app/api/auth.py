@@ -203,6 +203,10 @@ async def auth_config():
         "signup_mode": settings.signup_mode,
         "google_enabled": bool(settings.google_client_id),
         "google_client_id": settings.google_client_id,
+        # Whether the heavy ML-potential simulation tools run on this server. On the
+        # lite web edition this is false: the UI keeps the tools visible but tells
+        # users to install the desktop app when they try to run one.
+        "heavy_tools_enabled": settings.enable_heavy_tools,
     }
 
 

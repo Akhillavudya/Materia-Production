@@ -72,6 +72,24 @@ def _enqueue_job(
         return {"status": "error",
                 "message": "No authenticated session — cannot start a job."}
 
+    # Heavy-tools gate (Deployment Part A). The single backstop for EVERY path that
+    # would start an ML-potential job (agent, manual launch panel, direct API). On
+    # the free web server (ENABLE_HEAVY_TOOLS=false) nothing can spin up torch +
+    # MACE/MatterSim; instead the user is pointed at the desktop app, which runs the
+    # full tool set on their own machine.
+    if not settings.enable_heavy_tools:
+        return {
+            "status": "error",
+            "message": (
+                f"“{job_type.value.replace('_', ' ')}” is a long-running simulation "
+                "that runs on the machine, not in the web app. To run it, install the "
+                "**Materia desktop app** — it includes every simulation tool "
+                "(optimize, MD, elastic, phonons, NEB, SQS) and computes on your own "
+                "CPU/GPU. Everything else here (search, VASP inputs, structure "
+                "building, defects, symmetry) works in the browser."
+            ),
+        }
+
     # Per-user concurrency quota — protects the shared server from job spam.
     active = store.count_active_for_user(user_id)
     if active >= settings.max_active_jobs_per_user:

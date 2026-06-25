@@ -16,15 +16,17 @@ export async function signup(email, password, fullName = '', inviteCode = '') {
   return setAuthSession(await res.json())
 }
 
-// Public hint for the signup UI: { signup_mode: 'open' | 'invite' | 'closed' }.
-// Falls back to 'open' so the form still works if the call fails.
+// Public hint for the signup + tools UI, e.g.
+//   { signup_mode: 'open'|'invite'|'closed', heavy_tools_enabled: bool }.
+// Falls back to open signup + heavy tools enabled so the app still works (and
+// never wrongly hides simulation tools) if the call fails.
 export async function getAuthConfig() {
   try {
     const res = await fetch(`${API}/auth/config`)
-    if (!res.ok) return { signup_mode: 'open' }
+    if (!res.ok) return { signup_mode: 'open', heavy_tools_enabled: true }
     return await res.json()
   } catch {
-    return { signup_mode: 'open' }
+    return { signup_mode: 'open', heavy_tools_enabled: true }
   }
 }
 

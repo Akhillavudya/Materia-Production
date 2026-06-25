@@ -24,6 +24,7 @@ from app.agent.llm import get_provider
 from app.agent.providers.base import ToolCall
 from app.agent.tool_schemas import TOOL_SPECS
 from app.agent.tool_registry import CALLABLE_TOOL_MAP, TOOL_MAP
+from app.core.config import settings
 from app.core.context import set_request_identity
 
 # Drift guard: every executable tool must also be declared to the LLM (and vice
@@ -160,6 +161,25 @@ add_adsorbate.
 - For conceptual questions, greetings, or anything answerable from the \
 conversation, just reply directly — do not call a tool.
 - Be concise, accurate, and scientific. Use Markdown.
+"""
+
+
+# Appended to the system prompt when ENABLE_HEAVY_TOOLS=false (the lite web
+# deployment). The heavy tools are still declared so the model understands the
+# capability, but they cannot run on the server — so we tell the agent to point
+# the user at the desktop app instead of starting a job it cannot finish. The
+# backstop in tools/material_tools.py enforces this regardless of what the model
+# does; this note just makes the agent's reply helpful rather than a raw error.
+HEAVY_DISABLED_NOTE = """\
+
+DEPLOYMENT NOTE — this is the web edition. The long-running simulation tools \
+(optimize_structure, run_md_simulation, compute_elastic_tensor, compute_phonons, \
+generate_sqs, compute_neb, and the add_adsorbate relax=true path) DO NOT run on \
+this server. If the user asks for one of these, do NOT call the tool and do NOT \
+claim a job started. Instead, briefly explain that these ML-potential simulations \
+run in the **Materia desktop app** (on their own CPU/GPU) and that everything else \
+— search, VASP input generation, structure building, defects, symmetry, file ops \
+— works here in the browser. Still help fully with all the fast/instant tools.\
 """
 
 
@@ -415,7 +435,13 @@ async def _agent_loop(
 ) -> None:
     provider = get_provider()
 
-    conv: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}] + [
+    # On the lite web deployment the heavy tools stay declared (so the model
+    # understands them) but cannot run here — append a note so the agent guides
+    # users to the desktop app instead of starting a job the backstop will refuse.
+    system_prompt = SYSTEM_PROMPT
+    if not settings.enable_heavy_tools:
+        system_prompt += HEAVY_DISABLED_NOTE
+    conv: list[dict] = [{"role": "system", "content": system_prompt}] + [
         {"role": m["role"], "content": m.get("content", "")} for m in messages
     ]
     # Confirmed-plan execution: inject the approved plan as a final instruction
