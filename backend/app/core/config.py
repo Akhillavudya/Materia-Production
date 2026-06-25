@@ -123,10 +123,14 @@ class Settings(BaseModel):
 
     # ── LLM provider ─────────────────────────────────────────────────────────
     # The agent uses native function-calling (redesign §15). `model_provider`
-    # selects the backend: "groq" (hosted default), "gemini", or "ollama"
+    # selects the backend: "gemini" (hosted default), "groq", or "ollama"
     # (offline/local). When unset it auto-resolves in order of available keys:
-    # groq → gemini → ollama. Whichever is primary falls through the others at
-    # runtime (see agent/llm.py) on quota/429/connection errors.
+    # gemini → groq → ollama. Gemini is primary because its free tier is
+    # request-metered (not token-metered), so the ~8k-token tool schema sent on
+    # every call doesn't drain its quota the way it drains Groq's daily token cap;
+    # T4 also showed gemini-2.5-flash at 100% tool-selection vs Groq's judgment
+    # misses. Whichever is primary falls through the others at runtime
+    # (see agent/llm.py) on quota/429/connection errors.
     model_provider: str | None = None
     # Groq (free hosted tier — OpenAI-compatible, native tool calling, fast)
     groq_api_key: str | None = None
@@ -143,10 +147,10 @@ class Settings(BaseModel):
         """The effective LLM provider after auto-detection."""
         if self.model_provider:
             return self.model_provider.lower().strip()
-        if self.groq_api_key or os.getenv("GROQ_API_KEY"):
-            return "groq"
         if self.gemini_api_key or os.getenv("GEMINI_API_KEY"):
             return "gemini"
+        if self.groq_api_key or os.getenv("GROQ_API_KEY"):
+            return "groq"
         return "ollama"
 
     @property

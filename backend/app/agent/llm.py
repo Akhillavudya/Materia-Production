@@ -25,8 +25,8 @@ logger = get_logger(__name__)
 
 # Primary provider → ordered fallback chain tried (in order) when it fails.
 _FALLBACK_CHAIN: dict[str, list[str]] = {
+    "gemini": ["groq", "ollama"],
     "groq": ["gemini", "ollama"],
-    "gemini": ["ollama"],
 }
 
 # Text streamed before this many characters is held back so that a provider

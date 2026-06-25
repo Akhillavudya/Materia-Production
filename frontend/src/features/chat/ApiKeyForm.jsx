@@ -2,17 +2,17 @@ import { useState } from 'react'
 import { saveApiKey } from '../../api'
 
 const SERVICE_INFO = {
-  groq: {
-    name: 'Groq',
-    url: 'https://console.groq.com/keys',
-    placeholder: 'Paste your Groq API key here…',
-    hint: 'Free & fast — the default chat provider. Create a key at console.groq.com.',
-  },
   gemini: {
     name: 'Google Gemini',
     url: 'https://aistudio.google.com/apikey',
     placeholder: 'Paste your Gemini API key here…',
-    hint: 'Free chat provider. Create a key at aistudio.google.com → API keys.',
+    hint: 'Free — the default chat provider. Create a key at aistudio.google.com → API keys.',
+  },
+  groq: {
+    name: 'Groq',
+    url: 'https://console.groq.com/keys',
+    placeholder: 'Paste your Groq API key here…',
+    hint: 'Free & fast — optional backup chat provider. Create a key at console.groq.com.',
   },
   mp: {
     name: 'Materials Project',

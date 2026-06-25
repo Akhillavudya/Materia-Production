@@ -6,14 +6,14 @@ import { listKeys, saveApiKey, deleteKey } from '../../api/keys'
 // gets their keys in without leaving this panel.
 const PROVIDERS = [
   {
-    id: 'groq',
-    name: 'Groq',
+    id: 'gemini',
+    name: 'Google Gemini',
     level: 'required',
     purpose: 'Powers the AI chat — Materia can’t answer without an LLM key.',
     unlocks: 'AI chat, tool-calling, simulation planning.',
-    url: 'https://console.groq.com/keys',
-    info: 'Free, fast hosted LLM (Llama 3.3). Materia’s default chat provider.',
-    steps: ['Sign in at console.groq.com', 'Open “API Keys”', 'Create key → copy it'],
+    url: 'https://aistudio.google.com/apikey',
+    info: 'Free tier from Google AI Studio (Gemini 2.5 Flash). Materia’s default chat provider.',
+    steps: ['Sign in at aistudio.google.com', 'Open “API keys”', 'Create key → copy it'],
   },
   {
     id: 'mp',
@@ -26,14 +26,14 @@ const PROVIDERS = [
     steps: ['Sign in at materialsproject.org', 'Open the API page', 'Copy your API key'],
   },
   {
-    id: 'gemini',
-    name: 'Google Gemini',
+    id: 'groq',
+    name: 'Groq',
     level: 'optional',
-    purpose: 'A backup chat model — used automatically if Groq is rate-limited.',
-    unlocks: 'Fallback AI chat when Groq is unavailable.',
-    url: 'https://aistudio.google.com/apikey',
-    info: 'Free tier from Google AI Studio. Optional resilience, not required.',
-    steps: ['Sign in at aistudio.google.com', 'Open “API keys”', 'Create key → copy it'],
+    purpose: 'A backup chat model — used automatically if Gemini is rate-limited.',
+    unlocks: 'Fallback AI chat when Gemini is unavailable.',
+    url: 'https://console.groq.com/keys',
+    info: 'Free, fast hosted LLM (Llama 3.3). Optional resilience, not required.',
+    steps: ['Sign in at console.groq.com', 'Open “API Keys”', 'Create key → copy it'],
   },
 ]
 
@@ -90,9 +90,9 @@ export default function SettingsPanel({ onClose }) {
           <div style={s.onboard}>
             <div style={s.onboardTitle}>👋 New to Materia?</div>
             <ol style={s.onboardList}>
-              <li>Add a <strong>Groq</strong> key for AI chat.</li>
+              <li>Add a <strong>Gemini</strong> key for AI chat.</li>
               <li>Add a <strong>Materials Project</strong> key for materials search.</li>
-              <li>Optionally add a <strong>Gemini</strong> key as a backup model.</li>
+              <li>Optionally add a <strong>Groq</strong> key as a backup model.</li>
             </ol>
           </div>
 
