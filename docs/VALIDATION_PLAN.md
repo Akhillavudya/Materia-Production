@@ -1,7 +1,25 @@
 # Materia — Pre-Deployment Validation Plan
 
-**Status:** Planned (not started)
+**Status:** In progress — **T1 ✅ + T2 ✅ + T3 ✅ done** (2026-06-25); T4/T5 pending
 **Created:** 2026-06-25
+
+**Progress log:**
+- 2026-06-25 — T1 (ML-potential accuracy, HEADLINE): **6 models × 10 materials = 60
+  relaxations, all converged.** Mean |volume deviation| = **2.65%**, mean |bulk-modulus
+  error| = **8.3%** vs Materials Project DFT. Best geometry: mace-omat (2.38%); best
+  bulk modulus: mattersim-1M (3.7%). Harness `backend/scripts/validation/t1_mlp_accuracy.py`
+  + analysis `t1_analyze.py`; results + 2 parity plots in `docs/validation_results/T1_*`.
+  (Pilot run first per user, then scaled.) Ran on GPU/CUDA (~0.1–1.3 s/relax).
+- 2026-06-25 — T2 (structure-tool correctness): 23/23 pass, suite at
+  `backend/tests/validation/test_structure_tools.py`, results in
+  `docs/validation_results/T2_structure_tools.md`. **1 real bug found & fixed**
+  (adsorbate buried in asymmetric slabs — see `docs/issues_solve/2026-06-25-adsorbate-buried-in-asymmetric-slab.md`).
+- 2026-06-25 — T3 (VASP input fidelity): 21/21 pass, suite at
+  `backend/tests/validation/test_vasp_inputs.py`, results in
+  `docs/validation_results/T3_vasp_inputs.md`. ENCUT matches MPRelaxSet (520);
+  POTCAR labels 69% match to MP (deviations are the intentional VASP-recommended set).
+- Test net (Step-9-lite) now exists: `cd backend && ../venv/bin/python -m pytest tests/validation/` → 44 passed.
+- pytest added to the venv. Next: T1 (ML-potential accuracy, needs MP_API_KEY — present in backend/.env).
 **Purpose:** Produce original, reproducible validation evidence for Materia before public/lab deployment and as the experimental backbone of the Materia paper.
 
 ---

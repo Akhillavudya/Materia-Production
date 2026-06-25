@@ -94,7 +94,8 @@ def place_adsorbate(slab, molecule: str, site_type: str = "ontop",
         molecule:       adsorbate formula, e.g. ``"CO2"``.
         site_type:      ``"ontop"`` (default), ``"bridge"`` or ``"hollow"``.
         distance:       height of the adsorbate above the surface site (Å).
-        position_index: which symmetry-reduced site of that type to use (default 0).
+        position_index: which site of that type to use, ordered from the topmost
+                        surface downward (default 0 = the highest/true top site).
 
     Returns the combined slab+adsorbate ``Structure``.
     """
@@ -111,6 +112,13 @@ def place_adsorbate(slab, molecule: str, site_type: str = "ontop",
         raise ValueError(
             f"no '{st}' adsorption site found on this surface; try a different "
             "site_type (ontop/bridge/hollow).")
+    # Order candidates from the topmost surface down along the c (out-of-plane)
+    # normal. A trimmed/asymmetric slab can expose inequivalent top *and* bottom
+    # sites; without this, position_index=0 could land on a buried lower-surface
+    # site and bury the adsorbate inside the slab. index 0 == the true top site.
+    c = slab.lattice.matrix[2]
+    normal = c / float(np.linalg.norm(c))
+    coords = sorted(coords, key=lambda p: float(np.asarray(p) @ normal), reverse=True)
     idx = max(0, min(int(position_index), len(coords) - 1))
     return asf.add_adsorbate(mol, coords[idx])
 
