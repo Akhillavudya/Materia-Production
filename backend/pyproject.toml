@@ -1,0 +1,22 @@
+# Backend tooling config (Step 9). The app is installed from requirements.txt;
+# this file only configures the test runner and the linter.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = [
+    # Third-party deprecation noise we don't control — keep the run readable.
+    "ignore::DeprecationWarning",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+# Generated/vendored output and the heavy validation harness scripts aren't linted.
+extend-exclude = ["scripts/validation", "alembic"]
+
+[tool.ruff.lint]
+# Start conservative: pyflakes (real bugs — undefined names, bad imports) + a few
+# high-signal pycodestyle errors. Style-only rules are intentionally left off so
+# CI stays green on the existing codebase and only trips on genuine breakage.
+select = ["F", "E9"]

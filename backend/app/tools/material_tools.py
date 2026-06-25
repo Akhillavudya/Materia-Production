@@ -39,7 +39,6 @@ from app.services.simulation.calculator_factory import (
 from app.services.storage.file_service import (
     STORAGE_ROOT,
     find_structure_in_session,
-    get_session_dir,
     list_session_files,
     rel_to_storage,
     safe_file_in_session,

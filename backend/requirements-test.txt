@@ -1,0 +1,53 @@
+# Slim dependency set for CI (Step 9).
+#
+# The full requirements.txt pulls the heavy ML stack (torch, mace-torch,
+# mattersim, phonopy …) which the *web* process never imports. The unit tests and
+# the structure/VASP validation tests only need the web + materials-core libraries,
+# so CI installs this subset and runs the whole suite in well under a minute —
+# instead of building the ~4 GB image just to run pytest.
+#
+# Keep in sync with requirements.txt for the libraries listed here.
+
+# Web framework / server
+fastapi
+uvicorn
+python-multipart
+slowapi
+httpx
+
+# Config & validation
+pydantic
+python-dotenv
+
+# Persistence
+sqlalchemy
+aiosqlite
+asyncpg
+psycopg2-binary
+alembic
+
+# Job system (imported by app.main; broker not contacted in tests)
+celery[redis]
+redis
+
+# Auth & security
+passlib[bcrypt]
+bcrypt<4.1
+python-jose[cryptography]
+cryptography
+
+# LLM/agent SDKs (imported at app import time; not called in tests)
+groq
+google-genai
+ollama
+
+# Materials-science core (needed by the structure/VASP validation tests)
+ase
+pymatgen
+mp-api
+numpy
+requests
+
+# Test + lint tooling
+pytest
+ruff

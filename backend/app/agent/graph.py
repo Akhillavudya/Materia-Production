@@ -18,7 +18,7 @@ import asyncio
 import json
 import time
 from pathlib import Path
-from typing import Any, AsyncGenerator
+from typing import AsyncGenerator
 
 from app.agent.llm import get_provider
 from app.agent.providers.base import ToolCall

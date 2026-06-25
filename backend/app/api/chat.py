@@ -18,7 +18,7 @@ from app.database.db import AsyncSessionLocal, get_db
 from app.database.models import User
 from app.repositories import message_repository, session_repository
 from app.schemas.chat import ChatRequest, MessageOut, SessionOut
-from app.services.storage.file_service import STORAGE_ROOT, get_session_dir, list_session_files
+from app.services.storage.file_service import STORAGE_ROOT, list_session_files
 from app.services.key_service import load_user_keys_into_env
 
 router = APIRouter()

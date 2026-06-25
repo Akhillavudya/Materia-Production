@@ -222,7 +222,9 @@ def relax_adsorption(
     total = len(configs) + 2  # candidates + clean-slab ref + gas ref
 
     try:
-        calc = get_calculator(calc_cfg)
+        # Validate the calculator config up front (fail fast with a friendly
+        # message); each relaxation below builds its own fresh calculator.
+        get_calculator(calc_cfg)
     except Exception as e:  # noqa: BLE001
         return {"status": "error", "message": f"Calculator error: {e}"}
 

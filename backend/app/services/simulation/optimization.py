@@ -39,7 +39,6 @@ Usage
     )
 """
 
-import os
 import csv
 import json
 import time
@@ -108,9 +107,7 @@ def run_optimization(
     """
     try:
         from ase.io import read, write
-        from ase.io.trajectory import Trajectory
         from pymatgen.io.ase import AseAtomsAdaptor
-        from pymatgen.io.vasp import Poscar
     except ImportError as e:
         return {"status": "error", "message": f"Missing dependency: {e}"}
 
@@ -367,7 +364,6 @@ def _wrap_for_cell_relax(atoms, cell_relax: str):
 
 def _make_optimizer(optimizer_name: str, atoms, log_path: str, traj_path: str):
     """Instantiate the requested ASE optimizer."""
-    from ase.io import Trajectory
 
     kwargs = {"logfile": log_path}
 
