@@ -131,8 +131,11 @@ async def get_file_content(
     try:
         content = full_path.read_text(encoding="utf-8", errors="replace")
         return {"name": full_path.name, "content": content, "rel_path": rel_path}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Could not read file: {e}")
+    except Exception as e:  # noqa: BLE001
+        # Log the real reason privately; never echo raw exception text (which can
+        # contain absolute filesystem paths) back to the client (Step 6).
+        logger.error("Could not read file %s: %s", rel_path, e)
+        raise HTTPException(status_code=500, detail="Could not read file.")
 
 
 # ── GET /api/sessions/{id}/export/txt ────────────────────────────────────────

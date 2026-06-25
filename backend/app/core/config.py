@@ -220,6 +220,12 @@ def _validate_production(s: "Settings") -> None:
             "DATABASE_URL must point to PostgreSQL in production (SQLite is single-writer and "
             "corrupts under the concurrent api + worker access)."
         )
+    if not s.allowed_origins or "*" in s.allowed_origins:
+        problems.append(
+            "ALLOWED_ORIGINS must list your exact site origin(s) in production "
+            "(e.g. https://materia.example.com). A wildcard '*' is rejected — it "
+            "exposes the API to every site and is incompatible with credentialed CORS."
+        )
     if s.signup_mode not in {"open", "invite", "closed"}:
         problems.append(
             f"SIGNUP_MODE='{s.signup_mode}' is invalid. Use 'open', 'invite', or 'closed'."

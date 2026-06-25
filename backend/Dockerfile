@@ -70,9 +70,9 @@ USER appuser
 
 EXPOSE 8000
 
-# Simple liveness probe used by docker-compose healthcheck (Step 7 adds /health).
+# Liveness probe used by docker-compose healthcheck (Step 7).
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
-    CMD curl -fsS http://localhost:8000/ || exit 1
+    CMD curl -fsS http://localhost:8000/health || exit 1
 
 ENTRYPOINT ["./docker-entrypoint.sh"]
 # Default command = API server. The worker service overrides this in docker-compose.

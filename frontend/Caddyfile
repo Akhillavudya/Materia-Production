@@ -16,6 +16,13 @@
 		reverse_proxy api:8000
 	}
 
+	# Health/readiness probes (Step 7) — let an external uptime monitor ping
+	# https://your-domain/health and /ready straight through to the backend.
+	@health path /health /ready
+	handle @health {
+		reverse_proxy api:8000
+	}
+
 	# Everything else is the single-page app; unknown paths fall back to index.html.
 	handle {
 		root * /srv
