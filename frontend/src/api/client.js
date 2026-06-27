@@ -4,8 +4,14 @@
  */
 
 // Same-origin "/api" by default (Caddy proxies it to the backend). The desktop app
-// can point at an absolute backend URL by setting VITE_API_BASE_URL at build time.
-const API = import.meta.env.VITE_API_BASE_URL || '/api'
+// loads the SPA from file:// and runs the backend on a dynamic localhost port, so the
+// Electron preload injects the absolute base on window.__MATERIA_API__. Priority:
+// runtime global → build-time env → same-origin. The global is undefined in the
+// browser build, so the web app is unaffected.
+const API =
+  (typeof window !== 'undefined' && window.__MATERIA_API__) ||
+  import.meta.env.VITE_API_BASE_URL ||
+  '/api'
 const TOKEN_KEY = 'materia_access_token'
 const USER_KEY = 'materia_user'
 

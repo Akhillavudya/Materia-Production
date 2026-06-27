@@ -17,5 +17,6 @@
 
 ## 4. Explanation & Reporting Style
 * **Dual Focus:** Treat every session as both a software delivery and a learning session. 
+* **Per-File Change Notes:** After creating or editing ANY file, give a 2-line note **in the chat reply** (NOT as comments inside the code file) — line 1: *what* changed, line 2: *why / what it does* — so the user learns from every edit. Keep code comments matching the surrounding file's existing style/density.
 * **Beginner-Friendly Summaries:** Whenever running machine learning experiments, analyzing metrics, or delivering complex feature blocks, pair the technical output with a plain-language, beginner-friendly explanation.
 * **Signal Analysis:** Explicitly highlight data insights, performance trends, and signals for overfitting or underfitting in training/evaluation results.

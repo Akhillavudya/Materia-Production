@@ -6,9 +6,16 @@ from pathlib import Path
 from typing import Optional
 
 # absolute path — never depends on the CWD the server was started from.
-# This module lives at app/services/storage/, so the app root is two parents up
-# (storage → services → app); storage data lives at app/storage/runs.
-STORAGE_ROOT = Path(__file__).resolve().parents[2] / "storage" / "runs"
+# Honour STORAGE_ROOT when set (the desktop app points it at a writable userData dir;
+# inside a frozen binary the source-relative path is not writable). Otherwise this
+# module lives at app/services/storage/, so the app root is two parents up
+# (storage → services → app) and storage data lives at app/storage/runs.
+_STORAGE_ROOT_ENV = os.getenv("STORAGE_ROOT")
+STORAGE_ROOT = (
+    Path(_STORAGE_ROOT_ENV).expanduser().resolve() / "runs"
+    if _STORAGE_ROOT_ENV
+    else Path(__file__).resolve().parents[2] / "storage" / "runs"
+)
 
 # ── allowed upload extensions ─────────────────────────────────────────────────
 # VASP files have no extension — handled by name check

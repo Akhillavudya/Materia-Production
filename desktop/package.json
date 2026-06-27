@@ -1,0 +1,15 @@
+{
+  "name": "materia-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Materia desktop app — runs the full 23-tool backend (heavy ML simulations) on the user's own machine.",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "build:spa": "cd ../frontend && vite build --base=./ --outDir ../desktop/resources/spa --emptyOutDir",
+    "build:backend": "../venv/bin/python scripts/build_backend.py"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0"
+  }
+}

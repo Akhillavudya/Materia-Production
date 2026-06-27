@@ -1,0 +1,11 @@
+# Node / Electron
+node_modules/
+dist/
+
+# Build outputs (large; produced by CI / local build scripts)
+build/
+resources/backend/
+resources/spa/
+
+# OS cruft
+.DS_Store

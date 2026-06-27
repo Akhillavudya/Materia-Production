@@ -1,0 +1,12 @@
+# Desktop edition dependencies (Part C).
+# = the FULL backend stack (all 23 tools, torch + MACE + MatterSim + phonopy)
+# PLUS the freezer used to bundle it into a standalone executable.
+#
+# Install into the project venv before freezing:
+#     ./venv/bin/pip install -r backend/requirements-desktop.txt
+#
+# NOTE: for an actual release we install CPU-only torch (smaller, runs everywhere);
+# the C1 spike just reuses whatever torch is already in the venv.
+-r requirements.txt
+
+pyinstaller>=6.6
