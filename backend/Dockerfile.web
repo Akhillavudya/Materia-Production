@@ -1,0 +1,55 @@
+# Materia LITE WEB backend image (Part B) — torch-free, instant-tools-only.
+#
+# This is a SEPARATE, slim image from the full ./Dockerfile. It deliberately omits
+# PyTorch + MACE + MatterSim + phonopy + ATAT, so the 6 heavy ML-potential
+# simulations physically cannot run here (they are also gated by
+# ENABLE_HEAVY_TOOLS=false). The result is a much smaller, faster-building image
+# fit for the free-tier Oracle A1 server, where only the 15 instant tools run.
+#
+# The full image is unchanged — build it with ./Dockerfile for the desktop / full
+# compute edition. Build this one via docker-compose.web.yml.
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+# Build/runtime libraries the pure-python scientific wheels (pymatgen/ase) and the
+# Postgres driver need. No tcsh (that was only for ATAT/SQS, which web doesn't run).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        gcc g++ \
+        make \
+        curl \
+        libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python deps FIRST (own layer) so code edits don't re-download everything.
+# Slim, torch-free set — no CPU-torch index step, no legacy resolver needed.
+COPY requirements-web.txt .
+RUN pip install --upgrade pip \
+    && pip install --retries 5 --timeout 120 -r requirements-web.txt
+
+# Now copy the application code.
+COPY . .
+RUN chmod +x docker-entrypoint.sh
+
+# Build-time safety net: prove the slim (torch-free) image can import the whole app
+# with the heavy tools gated. If a future edit adds a top-level torch/mace import to
+# a startup path, THIS LINE FAILS THE BUILD instead of crashing at runtime in prod.
+RUN ENABLE_HEAVY_TOOLS=false python -c "import app.main; print('[web image] app.main imports OK (torch-free)')"
+
+# Run as a non-root user (least privilege).
+RUN useradd --create-home --uid 10001 appuser \
+    && chown -R appuser:appuser /app
+USER appuser
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+    CMD curl -fsS http://localhost:8000/health || exit 1
+
+ENTRYPOINT ["./docker-entrypoint.sh"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

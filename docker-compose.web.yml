@@ -1,0 +1,89 @@
+# Materia — LITE WEB edition (Part B). Deploy target: Oracle Cloud Always-Free
+# Ampere A1 (ARM64, 4 CPU / 24 GB RAM, NO GPU). Bring it up with:
+#
+#     docker compose -f docker-compose.web.yml up -d --build
+#
+# Difference vs docker-compose.full.yml: the `worker` and `redis` services are
+# DROPPED, and the API is built from the slim torch-free image (backend/Dockerfile.web).
+# This edition runs only the 15 instant tools (search, VASP input generation,
+# structure building, defects, symmetry, file ops). The 6 heavy ML-potential
+# simulations are gated off (ENABLE_HEAVY_TOOLS=false) so one click can't exhaust
+# the free shared server — users are pointed to the desktop app. With
+# JOB_BACKEND=inline the API never reaches for a broker, so no Redis is needed.
+#
+# Operator must provide these in a root .env file (NEVER committed) or the shell:
+#   POSTGRES_PASSWORD        strong DB password
+#   JWT_SECRET_KEY           python -c "import secrets; print(secrets.token_urlsafe(48))"
+#   FIELD_ENCRYPTION_KEY     python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+#   SITE_ADDRESS             your domain (e.g. materia.example.com) for auto-HTTPS; omit for local :80
+#   SITE_URL                 https://your-domain (used for CORS); defaults to http://localhost
+#   POTCAR_DIR               host path to the licensed VASP PAW files (mounted read-only at /potcar)
+# Optional:
+#   SIGNUP_MODE              open | invite | closed. Defaults to `invite` here so you
+#                            stay closed by default. During the first smoke test set
+#                            SIGNUP_MODE=open to create your account, then flip it back.
+#   INVITE_CODES             required when SIGNUP_MODE=invite (e.g. lab2026)
+#   GOOGLE_CLIENT_ID         OAuth web client id to enable "Continue with Google"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: materia
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: materia
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U materia"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.web          # slim, torch-free image (instant tools only)
+    restart: unless-stopped
+    environment:
+      ENV: production
+      RUN_MIGRATIONS: "1"                  # this service applies alembic migrations on boot
+      ENABLE_HEAVY_TOOLS: "false"          # WEB EDITION: gate the 6 heavy simulations (Part A)
+      JOB_BACKEND: inline                  # no Celery/Redis on web; gated tools never enqueue anyway
+      DATABASE_URL: postgresql://materia:${POSTGRES_PASSWORD}@postgres:5432/materia
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set JWT_SECRET_KEY}
+      FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:?set FIELD_ENCRYPTION_KEY}
+      ALLOWED_ORIGINS: ${SITE_URL:-http://localhost}
+      SIGNUP_MODE: ${SIGNUP_MODE:-invite}
+      INVITE_CODES: ${INVITE_CODES:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      # POTCAR (licensed PAW files) mounted read-only — generate_vasp_inputs needs them
+      # to assemble a real POTCAR and read authoritative ENMAX (per potcar-runtime-mount).
+      PMG_VASP_PSP_DIR: /potcar
+      PMG_VASP_FUNCTIONAL: ${PMG_VASP_FUNCTIONAL:-PBE_54}
+    volumes:
+      - ${POTCAR_DIR:?set POTCAR_DIR to the host POTCAR directory}:/potcar:ro
+      - materia_storage:/app/app/storage   # generated VASP inputs & file outputs
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  caddy:
+    build: ./frontend
+    restart: unless-stopped
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}   # domain for HTTPS, or :80 locally
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy_data:/data                   # persists the HTTPS certificate
+      - caddy_config:/config
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  materia_storage:
+  caddy_data:
+  caddy_config:

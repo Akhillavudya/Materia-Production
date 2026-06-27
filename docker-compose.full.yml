@@ -1,4 +1,13 @@
-# Materia full stack. Bring it up on the server with:  docker compose up -d --build
+# Materia FULL stack — ALL 23 tools, including the 6 heavy ML-potential simulations
+# (optimize, MD, elastic, phonons, NEB, SQS). This is the original full-compute edition:
+# api + Celery worker + Redis + Postgres + Caddy, built from the full ./backend image
+# (PyTorch + MACE + MatterSim + ATAT). Use this on a machine with the CPU/GPU budget
+# to actually run simulations (dev box, desktop, or a beefy server).
+#
+# For the lite, free-tier web deployment (15 instant tools only, heavy sims gated off,
+# NO worker/Redis/torch) see docker-compose.web.yml instead.
+#
+# Bring it up with:  docker compose -f docker-compose.full.yml up -d --build
 #
 # Operator must provide these in a root .env file (NEVER committed) or the shell:
 #   POSTGRES_PASSWORD        strong DB password

@@ -1,0 +1,63 @@
+# ── Materia LITE WEB requirements (Part B) ───────────────────────────────────
+# Slim, torch-free dependency set for the free-tier web deployment. It runs the
+# 15 INSTANT tools only (search, VASP input generation, structure building,
+# defects, symmetry, file ops). The 6 heavy ML-potential simulations are gated
+# off (ENABLE_HEAVY_TOOLS=false), so their deps are intentionally NOT installed.
+#
+# Verified safe: every torch/mace/mattersim/phonopy/seekpath/matplotlib import in
+# the codebase is lazy (function-level, ImportError-guarded) and lives only in the
+# gated heavy paths — so `import app.main` succeeds without them. The Dockerfile.web
+# build runs that import as a smoke test, failing the build if this ever regresses.
+#
+# Diff vs requirements.txt: DROPPED torch, torchvision, torchaudio, mace-torch,
+# mattersim, e3nn, phonopy, seekpath, matplotlib (and the ATAT C++ build).
+
+# ── Web framework / server ───────────────────────────────────────────────────
+fastapi
+uvicorn
+python-multipart
+slowapi
+httpx
+
+# ── Config & validation ──────────────────────────────────────────────────────
+pydantic
+python-dotenv
+
+# ── Persistence ──────────────────────────────────────────────────────────────
+sqlalchemy
+aiosqlite
+# PostgreSQL drivers (async for the web app; sync used by alembic migrations)
+asyncpg
+psycopg2-binary
+alembic
+
+# ── Job dispatch shim ─────────────────────────────────────────────────────────
+# app.jobs.queue imports `celery` at module load (pure-python, lightweight). The
+# web edition runs JOB_BACKEND=inline and never sends a task, so no Redis broker
+# is required — but the package must be importable. redis client kept for the same
+# import-safety reason; it never connects.
+celery[redis]
+redis
+
+# ── Auth & security ──────────────────────────────────────────────────────────
+passlib[bcrypt]
+bcrypt<4.1
+python-jose[cryptography]
+cryptography
+
+# ── LLM / agent (online BYOK; no local model bundled) ────────────────────────
+groq
+google-genai
+ollama
+
+# ── Materials science core (pure-python / numpy — needed by the instant tools) ─
+ase
+pymatgen
+mp-api
+pymatgen-analysis-defects     # vacancy/substitution/interstitial defect tools
+
+# ── Scientific stack ─────────────────────────────────────────────────────────
+numpy
+
+# ── HTTP utilities ───────────────────────────────────────────────────────────
+requests
