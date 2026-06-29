@@ -12,6 +12,13 @@ const API =
   (typeof window !== 'undefined' && window.__MATERIA_API__) ||
   import.meta.env.VITE_API_BASE_URL ||
   '/api'
+// Re-exported so the few modules that issue *unauthenticated* fetches (auth.js)
+// resolve the same base — otherwise they'd hit a literal "/api" which is broken
+// under the desktop's file:// + dynamic-port setup.
+export const apiBase = API
+// True only inside the Electron desktop shell (its preload sets window.__MATERIA_API__).
+// Used to gate desktop-only UI such as the local model-download screen.
+export const isDesktop = typeof window !== 'undefined' && !!window.__MATERIA_API__
 const TOKEN_KEY = 'materia_access_token'
 const USER_KEY = 'materia_user'
 

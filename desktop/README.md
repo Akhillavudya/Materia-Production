@@ -48,9 +48,15 @@ On launch the app stores all mutable state under Electron's `userData` dir:
 `materia.db` (SQLite), `models/` (downloaded checkpoints — C2), `storage/` (job
 outputs), and `secrets.json` (locally-generated JWT + Fernet keys).
 
+## Status — C2: DONE (Linux)
+- **First-run model download:** a screen offers to fetch the ML checkpoints into
+  `userData/models` (recommended set or all), with live progress; backed by
+  `/api/models` (gated to the desktop edition). See `docs/deployment_part_c/C2_EXPLAINED.md`.
+- **BYOK LLM:** the existing SettingsPanel key flow (Gemini→Groq) works in the
+  desktop window; fixed an `auth.js` bug that broke login/key-save under `file://`.
+- **SQS/ATAT:** deferred — SQS degrades gracefully when ATAT isn't on PATH.
+
 ## Known follow-ups
-- **C2:** first-run model download UX (reuse `scripts/fetch_models.sh` layout),
-  BYOK LLM verify, ATAT/SQS decision.
 - **Release torch:** the spike bundle uses the venv's CUDA torch (~5 GB). Releases
   should install CPU-only torch first (much smaller).
 - **C3:** electron-builder + GitHub Actions matrix (.exe/.dmg/.AppImage) + auto-update.

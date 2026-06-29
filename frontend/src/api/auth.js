@@ -2,9 +2,11 @@
  * Authentication API — signup, login, session validation.
  */
 
-import { authRequest, readError, setAuthSession } from './client'
+import { apiBase, authRequest, readError, setAuthSession } from './client'
 
-const API = '/api'
+// Resolve the same base as client.js (same-origin on web, dynamic localhost port
+// on desktop) so the unauthenticated signup/login/config fetches below work there.
+const API = apiBase
 
 export async function signup(email, password, fullName = '', inviteCode = '') {
   const res = await fetch(`${API}/auth/signup`, {

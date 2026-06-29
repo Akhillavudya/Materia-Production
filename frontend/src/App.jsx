@@ -10,8 +10,9 @@ import EditProfile from './features/settings/EditProfile'
 import HelpPanel from './features/settings/HelpPanel'
 import FileViewer from './features/files/FileViewer'
 import StructureWorkspace from './features/viewer/StructureWorkspace'
+import ModelSetup from './features/models/ModelSetup'
 import { useIsMobile, useBodyScrollLock, useTheme } from './hooks/ui'
-import { fetchMessages, getAuthToken, getMe, getStoredUser, logout } from './api'
+import { fetchMessages, getAuthToken, getMe, getStoredUser, isDesktop, listModels, logout } from './api'
 
 export default function App() {
   const [activeSessionId, setActiveSessionId] = useState(null)
@@ -35,6 +36,8 @@ export default function App() {
   const [viewingFile, setViewingFile] = useState(null)
   // full-screen VESTA-style structure visualizer (opened from the sidebar)
   const [showViewer, setShowViewer] = useState(false)
+  // desktop-only: first-run model download screen (also re-openable from sidebar)
+  const [showModelSetup, setShowModelSetup] = useState(false)
 
   // ── responsive + theme ──
   const isMobile = useIsMobile()
@@ -85,6 +88,17 @@ export default function App() {
     window.addEventListener('materia-auth-expired', handleAuthExpired)
     return () => window.removeEventListener('materia-auth-expired', handleAuthExpired)
   }, [])
+
+  // Desktop first-run: if logged in with no models on disk, surface the download
+  // screen once. Web never reaches this (isDesktop is false) and /models 404s there.
+  useEffect(() => {
+    if (!user || !isDesktop) return
+    let cancelled = false
+    listModels()
+      .then((data) => { if (!cancelled && data.present === 0) setShowModelSetup(true) })
+      .catch(() => { /* models endpoint unavailable → skip the gate */ })
+    return () => { cancelled = true }
+  }, [user])
 
   async function handleSelectSession(id) {
     setDrawerOpen(false)
@@ -217,6 +231,7 @@ export default function App() {
           onSelectSession={handleSelectSession}
           onNewChat={handleNewChat}
           onOpenViewer={() => { setShowViewer(true); setDrawerOpen(false) }}
+          onOpenModels={isDesktop ? () => { setShowModelSetup(true); setDrawerOpen(false) } : null}
           user={user}
           onSignOut={handleSignOut}
           onOpenSettings={() => { setShowSettings(true); setDrawerOpen(false) }}
@@ -311,6 +326,10 @@ export default function App() {
 
       {showHelp && (
         <HelpPanel onClose={() => setShowHelp(false)} />
+      )}
+
+      {showModelSetup && (
+        <ModelSetup onClose={() => setShowModelSetup(false)} />
       )}
     </div>
   )

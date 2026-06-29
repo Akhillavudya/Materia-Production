@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react'
 import {
   Plus, Search, Box, Wrench, Sun, Moon, Monitor, PanelLeftClose, X,
   Settings, LogOut, ChevronUp, ChevronDown, FileText, FileJson,
-  UserRound, HelpCircle,
+  UserRound, HelpCircle, HardDriveDownload,
 } from 'lucide-react'
 import { fetchSessions, downloadSessionTxt, downloadSessionJson } from '../../api'
 import { LogoMark } from '../../components/Logo'
@@ -53,6 +53,7 @@ export default function Sidebar({
   onSelectSession,
   onNewChat,
   onOpenViewer,
+  onOpenModels,
   user,
   onSignOut,
   onOpenSettings,
@@ -246,6 +247,16 @@ export default function Sidebar({
           disabled={!hasSession}
           title={hasSession ? 'Run a tool · view running jobs' : 'Start a chat to run tools'}
         />
+
+        {/* Models — desktop only: download/manage local ML potentials */}
+        {onOpenModels && (
+          <NavRow
+            icon={HardDriveDownload}
+            label="Models"
+            onClick={onOpenModels}
+            title="Download / manage local simulation models"
+          />
+        )}
 
         {/* Theme — opens the dedicated Appearance page; icon tracks the mode */}
         <NavRow
