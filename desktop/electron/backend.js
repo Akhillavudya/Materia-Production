@@ -19,6 +19,20 @@ const http = require('http')
 
 let child = null
 
+// Which build is this — the CPU installer or the GPU (CUDA) installer (C4)?
+// electron-builder stamps `materiaVariant` into package.json via extraMetadata in
+// CI (--config.extraMetadata.materiaVariant=gpu); defaults to 'cpu' for dev/local
+// builds. The GPU build ships CUDA torch and lets the backend auto-detect the GPU;
+// the CPU build pins cpu and hides any GPU so a stray CUDA torch can't JIT-crash.
+function buildVariant () {
+  if (process.env.MATERIA_VARIANT) return process.env.MATERIA_VARIANT.toLowerCase()
+  try {
+    return (require('../package.json').materiaVariant || 'cpu').toLowerCase()
+  } catch {
+    return 'cpu'
+  }
+}
+
 // Pick a free TCP port by binding to 0 and reading back the assigned port.
 function getFreePort () {
   return new Promise((resolve, reject) => {
@@ -96,6 +110,8 @@ async function startBackend () {
 
   const port = await getFreePort()
   const secrets = loadOrCreateSecrets(userData)
+  const variant = buildVariant()
+  const isGpu = variant === 'gpu'
 
   const env = {
     ...process.env,
@@ -103,6 +119,11 @@ async function startBackend () {
     MATERIA_PORT: String(port),
     ENV: 'development',            // skips the production strong-secret gate
     ENABLE_HEAVY_TOOLS: 'true',    // desktop runs the 6 heavy simulations locally
+    MATERIA_VARIANT: variant,      // surfaced by /api/system so the UI badge can explain CPU vs GPU
+    // CPU build: pin cpu and hide any GPU so a stray CUDA torch can't nvrtc-JIT-crash.
+    // GPU build (C4): leave MATERIA_DEVICE unset so the backend auto-detects cuda>mps>cpu
+    //   — a GPU build on a machine with no usable GPU therefore degrades to CPU, not breaks.
+    ...(isGpu ? {} : { MATERIA_DEVICE: 'cpu', CUDA_VISIBLE_DEVICES: '' }),
     JOB_BACKEND: 'inline',         // no Celery/Redis; jobs run in a daemon thread
     DATABASE_URL: '',              // force the SQLite fallback
     DB_PATH: path.join(userData, 'materia.db'),

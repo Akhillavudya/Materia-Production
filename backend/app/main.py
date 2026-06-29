@@ -24,6 +24,7 @@ from app.api.health import router as health_router
 from app.api.jobs import router as jobs_router
 from app.api.keys import router as keys_router
 from app.api.models import router as models_router
+from app.api.system import router as system_router
 from app.api.upload import router as upload_router
 from app.database.db import init_db
 
@@ -90,6 +91,7 @@ app.include_router(files_router, prefix="/api")
 app.include_router(catalog_router, prefix="/api")
 app.include_router(jobs_router, prefix="/api")
 app.include_router(models_router, prefix="/api")
+app.include_router(system_router, prefix="/api")
 
 
 @app.on_event("startup")

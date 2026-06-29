@@ -4,6 +4,8 @@
   "private": true,
   "description": "Materia desktop app — runs the full 23-tool backend (heavy ML simulations) on the user's own machine.",
   "main": "electron/main.js",
+  "materiaVariant": "cpu",
+  "_comment_materiaVariant": "Build flavour (cpu|gpu). CI overrides this for the GPU build via electron-builder --config.extraMetadata.materiaVariant=gpu; backend.js reads it to pick the compute device. (C4)",
   "scripts": {
     "start": "electron .",
     "build:spa": "cd ../frontend && npx vite build --base=./ --outDir ../desktop/resources/spa --emptyOutDir",

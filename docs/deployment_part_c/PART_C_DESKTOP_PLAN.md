@@ -174,10 +174,20 @@ self‑contained Python (python‑build‑standalone) + venv instead of a single
 
 ---
 
-## 5. C4 — GPU/CUDA pack (DEFERRED)
+## 5. C4 — GPU/CUDA pack (WIRED 2026-06-29)
 
-CPU torch ships first and works everywhere. A later optional CUDA build improves heavy‑job
-speed on NVIDIA machines. Out of scope until after launch.
+CPU torch ships first and works everywhere. C4 adds an **optional second installer**,
+**Materia-GPU** (CUDA 12.4 torch, Windows + Linux only), that runs the heavy jobs on an
+NVIDIA GPU for a large speed-up. Users pick CPU vs GPU on the download page (Option A); the
+GPU build **falls back to CPU** if no usable GPU is found, so a wrong choice is slow, never
+broken. Full write-up: `C4_EXPLAINED.md`. Local-verified on Linux/RTX A4000; the real
+go/no-go is a `v*` tag producing 5 green installers + a GPU-box smoke test.
+
+Mechanism: build variant stamped via electron-builder `extraMetadata.materiaVariant`;
+`backend.js` picks the device per variant; new `GET /api/system` + a device badge in the
+Models screen show GPU vs CPU; CI matrix gains a `variant` axis (mac excluded from gpu);
+GPU edition uses a distinct `productName`/`appId` and its own `gpu` update channel so the
+two editions coexist on one Release and auto-update independently.
 
 ---
 

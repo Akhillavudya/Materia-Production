@@ -342,7 +342,16 @@ def _find_checkpoint(model_dir: Path, suffixes: list[str]) -> Path:
 
 
 def _auto_device() -> str:
-    """Detect best available device: cuda > mps > cpu."""
+    """Detect best available device: cuda > mps > cpu.
+
+    A MATERIA_DEVICE env var (cpu|cuda|mps) overrides detection. The desktop shell
+    pins this to "cpu": the v1 build ships CPU-only torch (GPU is the deferred C4
+    pack), and forcing CPU also avoids nvrtc JIT errors when a CUDA torch is bundled
+    without its matching runtime libs.
+    """
+    forced = os.environ.get("MATERIA_DEVICE", "").strip().lower()
+    if forced in ("cpu", "cuda", "mps"):
+        return forced
     try:
         import torch
         if torch.cuda.is_available():
@@ -352,3 +361,31 @@ def _auto_device() -> str:
     except ImportError:
         pass
     return "cpu"
+
+
+def device_info() -> dict:
+    """Report which device the heavy ML‑potential jobs will actually run on.
+
+    Powers the desktop "Running on GPU/CPU" badge and the /api/system endpoint.
+    ``device`` is what _auto_device() would pick (so it reflects the MATERIA_DEVICE
+    override AND any graceful CPU fallback in the GPU build); ``cuda_available`` and
+    ``gpu_name`` describe what torch can actually see, so a GPU‑build user who has no
+    usable GPU sees device=cpu with cuda_available=false — i.e. it degraded, not broke.
+    """
+    device = _auto_device()
+    info: dict = {
+        "device": device,
+        "forced": os.environ.get("MATERIA_DEVICE", "").strip().lower() or None,
+        "cuda_available": False,
+        "gpu_name": None,
+        "torch_version": None,
+    }
+    try:
+        import torch
+        info["torch_version"] = torch.__version__
+        info["cuda_available"] = bool(torch.cuda.is_available())
+        if info["cuda_available"]:
+            info["gpu_name"] = torch.cuda.get_device_name(0)
+    except Exception:  # noqa: BLE001 — torch missing/broken must not 500 the endpoint
+        pass
+    return info

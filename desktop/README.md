@@ -90,7 +90,22 @@ npm run pack                        # local unpacked build (no publish), or:
   `.dmg` until signing lands. Windows (NSIS) and Linux (AppImage) auto-update normally.
 - Signing + notarisation is deferred (roadmap §5).
 
+## Status — C4: GPU / CUDA pack (wired)
+Each release now ships **two flavours** (see `docs/deployment_part_c/C4_EXPLAINED.md`):
+
+| Flavour | OS | torch | Device |
+|---------|----|-------|--------|
+| **Materia** (CPU) | Win / mac / Linux | CPU wheels | CPU (pinned) |
+| **Materia-GPU** | Win / Linux | CUDA 12.4 wheels | auto: NVIDIA GPU → else CPU |
+
+- **Which one do I download?** NVIDIA GPU on Windows/Linux → **Materia-GPU** (much faster
+  heavy jobs). Everything else (no NVIDIA card, or any Mac) → **Materia** (CPU).
+- The GPU build **degrades gracefully**: no usable GPU → it just runs on CPU, doesn't crash.
+- The app shows which device it's using in **Simulation Models** (sidebar → Models); it
+  reads `GET /api/system`. A GPU build that fell back to CPU says so there.
+- The CI matrix builds both flavours per `v*` tag; the GPU build uses a distinct
+  `productName`/`appId` and its own electron-updater `gpu` channel, so the two never
+  collide on the Release and each auto-updates only to its own kind.
+
 ## Known follow-ups
-- **CUDA pack (C4):** CPU torch ships first and runs everywhere; an optional CUDA build
-  for NVIDIA machines is deferred until after launch.
 - **Code signing (C5):** removes the OS warnings and unlocks macOS auto-update.

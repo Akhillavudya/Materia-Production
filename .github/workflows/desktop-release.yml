@@ -1,9 +1,16 @@
-# Materia Desktop — Part C / C3 release matrix.
+# Materia Desktop — Part C / C3 + C4 release matrix.
 #
 # Trigger: push a tag like `v0.1.0` (keep it in sync with desktop/package.json
 # "version"). For each OS we build the PyInstaller backend NATIVELY (torch is not
 # cross-compilable), build the SPA, then electron-builder packages + publishes the
 # installer to a GitHub Release. electron-updater clients read that release feed.
+#
+# C4 adds a second build FLAVOUR per release: `cpu` (default, every OS) and `gpu`
+# (CUDA torch, Windows + Linux only — there is no CUDA on macOS). Both flavours
+# publish to the SAME tagged Release but never collide: the GPU build uses a
+# distinct productName/appId (its own filenames + install dir) and its own
+# electron-updater channel (`gpu` → gpu-*.yml), so each flavour only auto-updates
+# to its own kind.
 #
 # Manual dry runs: `workflow_dispatch` builds the installers without publishing.
 
@@ -20,11 +27,15 @@ permissions:
 
 jobs:
   build:
-    name: ${{ matrix.os }}
+    name: ${{ matrix.os }} (${{ matrix.variant }})
     strategy:
-      fail-fast: false     # one OS failing shouldn't kill the other installers
+      fail-fast: false     # one OS/flavour failing shouldn't kill the others
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        variant: [cpu, gpu]
+        exclude:
+          - os: macos-latest   # no NVIDIA/CUDA on macOS → no GPU build
+            variant: gpu
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -40,15 +51,23 @@ jobs:
         with:
           node-version: "20"
 
-      # 1) Freeze the backend with CPU-only torch (smaller, runs everywhere — no CUDA).
-      #    Install the torch family first from the CPU wheel index, then the rest with
-      #    the legacy resolver (mirrors backend/Dockerfile so the proven combo holds).
-      - name: Install backend deps (CPU torch)
+      # 1) Freeze the backend. The ONLY difference between the cpu and gpu flavours
+      #    is which torch wheel index we install from: the CPU wheels (small, run
+      #    everywhere) vs the CUDA 12.4 wheels (bigger, use an NVIDIA GPU). The rest
+      #    of the deps install identically with the legacy resolver (mirrors
+      #    backend/Dockerfile so the proven combo holds).
+      - name: Install backend deps (${{ matrix.variant }} torch)
         working-directory: backend
         run: |
+          if [ "${{ matrix.variant }}" = "gpu" ]; then
+            TORCH_INDEX="https://download.pytorch.org/whl/cu124"
+          else
+            TORCH_INDEX="https://download.pytorch.org/whl/cpu"
+          fi
+          echo "Installing torch from: $TORCH_INDEX"
           python -m pip install --upgrade pip
           pip install --retries 5 --timeout 120 \
-            --index-url https://download.pytorch.org/whl/cpu \
+            --index-url "$TORCH_INDEX" \
             torch torchvision torchaudio
           pip install --retries 5 --timeout 120 \
             --use-deprecated=legacy-resolver -r requirements-desktop.txt
@@ -64,29 +83,40 @@ jobs:
           npm install
           npx vite build --base=./ --outDir ../desktop/resources/spa --emptyOutDir
 
-      # 3) Package + publish the installer for this OS.
+      # 3) Package + publish the installer for this OS + flavour.
       #    `npm install` (not ci) so the lockfile tolerates the C3 dep additions.
       - name: Install electron tooling
         working-directory: desktop
         run: npm install
 
+      # The GPU flavour overrides productName/appId/channel so it ships as a
+      # side-by-side "Materia GPU" with its own update feed; the CPU flavour uses
+      # the electron-builder.yml defaults unchanged.
       - name: Build & publish installer
         working-directory: desktop
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            npm run dist -- --publish always
-          else
-            npm run dist -- --publish never
+          if [ "${{ github.event_name }}" = "push" ]; then PUBLISH=always; else PUBLISH=never; fi
+
+          # Note: no spaces in any value — $CONFIG expands unquoted below, so a
+          # space (e.g. "Materia GPU") would word-split into broken args. The hyphen
+          # also keeps the GPU artifact filenames clean (Materia-GPU-<ver>-<arch>.*).
+          CONFIG="--config.extraMetadata.materiaVariant=${{ matrix.variant }}"
+          if [ "${{ matrix.variant }}" = "gpu" ]; then
+            CONFIG="$CONFIG --config.productName=Materia-GPU"
+            CONFIG="$CONFIG --config.appId=ai.materia.desktop.gpu"
+            CONFIG="$CONFIG --config.publish.channel=gpu"
           fi
+
+          npm run dist -- $CONFIG --publish $PUBLISH
 
       # On a manual dry run, keep the artifacts so they can be downloaded + tested.
       - name: Upload installers (dry run)
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
-          name: materia-${{ matrix.os }}
+          name: materia-${{ matrix.os }}-${{ matrix.variant }}
           path: |
             desktop/dist/*.AppImage
             desktop/dist/*.dmg

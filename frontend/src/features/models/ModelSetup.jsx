@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { listModels, downloadModels } from '../../api/models'
+import { getSystem } from '../../api/system'
 
 // First-run (and re-openable) screen for the desktop app: download the ML-potential
 // checkpoints onto the user's machine. The heavy simulations load these locally, so
@@ -16,7 +17,15 @@ export default function ModelSetup({ onClose }) {
   const [models, setModels] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [sys, setSys] = useState(null)
   const pollRef = useRef(null)
+
+  // One-shot: which device will the heavy sims run on? (404s on web → stays null.)
+  useEffect(() => {
+    let alive = true
+    getSystem().then((d) => { if (alive) setSys(d) }).catch(() => {})
+    return () => { alive = false }
+  }, [])
 
   const refresh = useCallback(async () => {
     try {
@@ -79,6 +88,8 @@ export default function ModelSetup({ onClose }) {
         </div>
 
         <div style={s.body}>
+          {sys && <DeviceBadge sys={sys} />}
+
           {loading && <div style={s.muted}>Loading models…</div>}
 
           {!loading && recommended.length > 0 && (
@@ -117,6 +128,42 @@ export default function ModelSetup({ onClose }) {
             {hasAny ? 'Continue' : 'Skip for now'}
           </button>
         </div>
+      </div>
+    </div>
+  )
+}
+
+// Shows which device the heavy simulations will actually use, and nudges toward the
+// GPU build when relevant. Three cases: accelerated (GPU/MPS), GPU build that fell
+// back to CPU (no usable GPU), and the plain CPU build.
+function DeviceBadge({ sys }) {
+  let tone, icon, title, detail
+
+  if (sys.device === 'cuda') {
+    tone = 'ok'; icon = '⚡'
+    title = 'Running on GPU'
+    detail = sys.gpu_name || 'CUDA device'
+  } else if (sys.device === 'mps') {
+    tone = 'ok'; icon = '⚡'
+    title = 'Running on GPU'
+    detail = 'Apple GPU (Metal / MPS)'
+  } else if (sys.variant === 'gpu') {
+    // GPU installer, but torch found no usable GPU → graceful CPU fallback.
+    tone = 'warn'; icon = '◧'
+    title = 'Running on CPU'
+    detail = 'GPU build, but no compatible GPU was detected — check your NVIDIA drivers.'
+  } else {
+    tone = 'muted'; icon = '▣'
+    title = 'Running on CPU'
+    detail = 'For NVIDIA acceleration, install the GPU build of Materia.'
+  }
+
+  return (
+    <div style={s.devBadge(tone)}>
+      <span style={s.devIcon(tone)}>{icon}</span>
+      <div style={s.devText}>
+        <span style={s.devTitle}>{title}</span>
+        <span style={s.devDetail}>{detail}</span>
       </div>
     </div>
   )
@@ -184,6 +231,24 @@ const s = {
 
   body: { padding: '16px 22px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px' },
   muted: { fontSize: '12px', color: 'var(--text-muted)' },
+
+  devBadge: (tone) => ({
+    display: 'flex', alignItems: 'center', gap: '10px',
+    padding: '10px 13px', borderRadius: 'var(--radius-md)',
+    background: tone === 'ok' ? 'var(--status-ok-bg, var(--accent-blue))'
+             : tone === 'warn' ? 'var(--status-warn-bg, var(--accent-blue))'
+             : 'var(--hover-bg)',
+    border: `1px solid ${tone === 'ok' ? 'var(--status-ok-fg)'
+             : tone === 'warn' ? 'var(--danger-fg)' : 'var(--border)'}`,
+  }),
+  devIcon: (tone) => ({
+    fontSize: '16px', lineHeight: 1,
+    color: tone === 'ok' ? 'var(--status-ok-fg)'
+         : tone === 'warn' ? 'var(--danger-fg)' : 'var(--text-muted)',
+  }),
+  devText: { display: 'flex', flexDirection: 'column', gap: '1px', minWidth: 0 },
+  devTitle: { fontSize: '12.5px', fontWeight: 600, color: 'var(--text-primary)' },
+  devDetail: { fontSize: '11.5px', color: 'var(--text-secondary)', lineHeight: 1.4 },
 
   recCard: {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px',
