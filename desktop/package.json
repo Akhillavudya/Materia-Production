@@ -6,10 +6,16 @@
   "main": "electron/main.js",
   "scripts": {
     "start": "electron .",
-    "build:spa": "cd ../frontend && vite build --base=./ --outDir ../desktop/resources/spa --emptyOutDir",
-    "build:backend": "../venv/bin/python scripts/build_backend.py"
+    "build:spa": "cd ../frontend && npx vite build --base=./ --outDir ../desktop/resources/spa --emptyOutDir",
+    "build:backend": "../venv/bin/python scripts/build_backend.py",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
   },
   "devDependencies": {
-    "electron": "^31.0.0"
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
   }
 }

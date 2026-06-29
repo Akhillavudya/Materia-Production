@@ -56,7 +56,41 @@ outputs), and `secrets.json` (locally-generated JWT + Fernet keys).
   desktop window; fixed an `auth.js` bug that broke login/key-save under `file://`.
 - **SQS/ATAT:** deferred — SQS degrades gracefully when ATAT isn't on PATH.
 
+## Status — C3: installers + auto-update (wired)
+- **electron-builder** (`electron-builder.yml`) packages three targets: `.AppImage`
+  (Linux), `.dmg` (macOS), `.exe`/NSIS (Windows). The frozen backend ships **unpacked**
+  via `extraResources` (too big for asar); the SPA + Electron shell go in the app archive.
+- **GitHub Actions** (`.github/workflows/desktop-release.yml`): push a `v*` tag →
+  ubuntu/macos/windows matrix builds the PyInstaller backend **natively per OS with
+  CPU-only torch**, builds the SPA, and `electron-builder --publish always` uploads the
+  installers to a GitHub Release. `workflow_dispatch` does a no-publish dry run that
+  uploads the installers as build artifacts.
+- **electron-updater** checks that Release feed on launch (packaged builds only) and
+  downloads updates in the background.
+
+### Release locally / cut a release
+```bash
+# one-time per machine: CPU torch + freezer (don't reuse the CUDA dev venv for a release)
+pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision torchaudio
+pip install --use-deprecated=legacy-resolver -r backend/requirements-desktop.txt
+
+cd desktop
+python scripts/build_backend.py     # freeze backend → resources/backend/
+npm run build:spa                   # build SPA → resources/spa/
+npm install
+npm run pack                        # local unpacked build (no publish), or:
+# tag + push to let CI build all 3 OS and publish:
+#   (bump desktop/package.json "version" to match) → git tag v0.1.0 && git push prod v0.1.0
+```
+
+### Unsigned v1 — caveats (documented on purpose)
+- The app is **not code-signed**. Users click through one OS warning on first launch
+  (macOS: right-click → Open; Windows SmartScreen: More info → Run anyway).
+- **macOS auto-update needs a signed app**, so mac users update by re-downloading the
+  `.dmg` until signing lands. Windows (NSIS) and Linux (AppImage) auto-update normally.
+- Signing + notarisation is deferred (roadmap §5).
+
 ## Known follow-ups
-- **Release torch:** the spike bundle uses the venv's CUDA torch (~5 GB). Releases
-  should install CPU-only torch first (much smaller).
-- **C3:** electron-builder + GitHub Actions matrix (.exe/.dmg/.AppImage) + auto-update.
+- **CUDA pack (C4):** CPU torch ships first and runs everywhere; an optional CUDA build
+  for NVIDIA machines is deferred until after launch.
+- **Code signing (C5):** removes the OS warnings and unlocks macOS auto-update.

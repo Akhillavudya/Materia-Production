@@ -1,0 +1,62 @@
+# electron-builder config — Part C / C3 ("ship it").
+# Packages the Electron shell + built SPA into a per-OS installer, with the
+# PyInstaller-frozen Python backend shipped UNPACKED alongside the app so it stays
+# a real executable on disk (backend.js resolves it via process.resourcesPath).
+#
+# Unsigned for v1 (documented in README): users click through one OS warning.
+# Signing + notarisation is deferred (roadmap §5 / Part C C5).
+
+appId: ai.materia.desktop
+productName: Materia
+copyright: © 2026 Materia
+
+directories:
+  output: dist            # installers land here (git-ignored)
+  buildResources: build-assets  # icon.png lives here; NOT the gitignored build/ scratch
+
+# What goes INSIDE the app archive (asar): the Electron shell + the built SPA only.
+# The backend is far too large for asar and must stay executable → extraResources.
+files:
+  - electron/**/*
+  - resources/spa/**/*
+  - package.json
+
+# The frozen Python backend (onedir, multi-GB) ships unpacked under the app's
+# resources dir. `from` is relative to the desktop/ project; `to` is relative to
+# the platform resources path that backend.js reads (process.resourcesPath/backend).
+extraResources:
+  - from: resources/backend
+    to: backend
+
+# Auto-update + release publishing target: GitHub Releases on the prod repo.
+# electron-builder writes latest*.yml here; electron-updater reads them at runtime.
+publish:
+  provider: github
+  owner: Akhillavudya
+  repo: Materia-Production
+
+linux:
+  target:
+    - AppImage
+  category: Science
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+mac:
+  target:
+    - dmg
+  category: public.app-category.education
+  # Unsigned v1: don't try to harden/assess. (Auto-update on macOS needs signing,
+  # so mac users update by re-downloading until signing lands — see README.)
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+win:
+  target:
+    - nsis
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true

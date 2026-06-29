@@ -154,6 +154,24 @@ self‑contained Python (python‑build‑standalone) + venv instead of a single
 - **Acceptance:** tag → CI produces 3 installers → fresh installs on each OS launch and
   run a local job → publishing a new tag auto‑updates an installed client.
 
+**Status — implemented 2026‑06‑29 (not yet release‑tested):**
+- `desktop/electron-builder.yml` — appId `ai.materia.desktop`, 3 targets, frozen backend
+  via `extraResources` (unpacked), SPA+shell in asar, GitHub publish → `Materia-Production`.
+- `desktop/package.json` — added `electron-builder` (dev) + `electron-updater` (runtime),
+  `pack`/`dist` scripts; lockfile updated.
+- `desktop/electron/main.js` — `electron-updater` checks the Release feed on launch
+  (packaged builds only).
+- `desktop/build-assets/icon.png` — 1024² placeholder; electron-builder auto-derives
+  `.icns`/`.ico`.
+- `.github/workflows/desktop-release.yml` — `v*` tag → matrix → CPU torch + freeze +
+  SPA + `electron-builder --publish always`; `workflow_dispatch` = no-publish dry run
+  that uploads installers as artifacts.
+- **Caveats (v1):** unsigned (one OS warning); **macOS auto-update needs signing** so mac
+  updates are manual re-download for now; Win/Linux auto-update works.
+- **Remaining go/no-go:** push a `v*` tag (or run the dry-run workflow) → confirm all 3
+  installers build green and a fresh install runs a local MACE job. C4 (CUDA) + C5
+  (signing) deferred.
+
 ---
 
 ## 5. C4 — GPU/CUDA pack (DEFERRED)

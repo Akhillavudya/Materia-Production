@@ -5,8 +5,20 @@
 const { app, BrowserWindow } = require('electron')
 const path = require('path')
 const { startBackend, stopBackend } = require('./backend')
+const { autoUpdater } = require('electron-updater')
 
 let mainWindow = null
+
+// Check GitHub Releases for a newer version and download+notify in the background.
+// Only in packaged builds: in dev there is no published feed and no signature.
+// macOS auto-apply needs a signed app, so until signing lands this is effectively
+// Windows/Linux-only; it fails quietly elsewhere.
+function initAutoUpdate () {
+  if (!app.isPackaged) return
+  autoUpdater.autoDownload = true
+  autoUpdater.on('error', (err) => console.error('[updater]', err))
+  autoUpdater.checkForUpdatesAndNotify().catch((err) => console.error('[updater]', err))
+}
 
 function createWindow (port) {
   mainWindow = new BrowserWindow({
@@ -32,6 +44,7 @@ app.whenReady().then(async () => {
   try {
     const { port } = await startBackend()
     createWindow(port)
+    initAutoUpdate()
   } catch (err) {
     console.error('[main] failed to start backend:', err)
     app.quit()
