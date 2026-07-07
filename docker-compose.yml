@@ -41,9 +41,18 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set JWT_SECRET_KEY}
       FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:?set FIELD_ENCRYPTION_KEY}
       ALLOWED_ORIGINS: ${SITE_URL:-http://localhost}
+      ENABLE_HEAVY_TOOLS: "true"                  # full 23-tool web: ML sims run server-side (CPU)
+      SIGNUP_MODE: ${SIGNUP_MODE:-invite}         # private launch = invite-only; flip to "open" after the paper
+      INVITE_CODES: ${INVITE_CODES:-}             # required while SIGNUP_MODE=invite (app refuses to boot if empty)
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}     # optional "Continue with Google"
+      MODEL_PROVIDER: ${MODEL_PROVIDER:-gemini}   # BYOK primary provider (users add their own key)
+      PMG_VASP_PSP_DIR: /potcar                   # licensed POTCARs, mounted read-only below
+      PMG_VASP_FUNCTIONAL: ${PMG_VASP_FUNCTIONAL:-PBE_54}
       PRE_TRAINED_MODELS_DIR: /models
     volumes:
       - ./pre_trained_models:/models:ro          # 398 MB checkpoints, read-only
+      - ./data/c2db:/data/c2db:ro                # 71 MB C2DB 2D-materials db (search)
+      - ${POTCAR_DIR:?set POTCAR_DIR to your licensed POTCAR tree}:/potcar:ro
       - materia_storage:/app/app/storage         # job outputs, shared with worker
     depends_on:
       postgres: { condition: service_healthy }
@@ -63,6 +72,7 @@ services:
       start_period: 30s
     environment:
       ENV: production
+      ENABLE_HEAVY_TOOLS: "true"                  # worker runs the ML-potential jobs
       DATABASE_URL: postgresql://materia:${POSTGRES_PASSWORD}@postgres:5432/materia
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set JWT_SECRET_KEY}
@@ -70,6 +80,7 @@ services:
       PRE_TRAINED_MODELS_DIR: /models
     volumes:
       - ./pre_trained_models:/models:ro
+      - ./data/c2db:/data/c2db:ro                # C2DB db (worker refetches structures too)
       - materia_storage:/app/app/storage
     depends_on:
       postgres: { condition: service_healthy }
