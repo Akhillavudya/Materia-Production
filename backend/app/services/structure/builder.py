@@ -19,52 +19,79 @@ def _axis_index(axis) -> int:
     return _AXIS_INDEX[key]
 
 
-def _sc_matrix(supercell):
-    """Parse a supercell spec into a diagonal matrix, or None for auto-sizing."""
-    if not supercell:
-        return None
-    vals = [int(x) for x in str(supercell).replace(",", " ").split()]
-    if len(vals) == 1:
-        vals = vals * 3
-    if len(vals) != 3 or any(v < 1 for v in vals):
-        raise ValueError("supercell must be one or three positive integers, e.g. '2 2 2'.")
-    return np.diag(vals)
+def _resolve_count(count, available: int, label: str) -> int:
+    """Turn a `count` spec (int, numeric string, ``None``, or "all") into a number.
 
-
-def create_vacancy(structure, element=None, supercell=None):
-    """Return a defective supercell with one `element` atom removed (a vacancy).
-
-    Picks the first symmetry-distinct site of `element` (or any site if omitted).
-    Returns (defect_structure, defect_name).
+    ``None`` → 1 (single defect, the common case). "all" → every matching site.
+    Anything else must be a positive integer, and never more than `available`.
     """
-    from pymatgen.analysis.defects.generators import VacancyGenerator
+    if count is None:
+        n = 1
+    elif isinstance(count, str) and count.strip().lower() == "all":
+        n = available
+    else:
+        try:
+            n = int(count)
+        except (TypeError, ValueError):
+            raise ValueError(f"count must be a positive integer or 'all', got {count!r}.")
+    if n < 1:
+        raise ValueError("count must be at least 1 (or 'all').")
+    if n > available:
+        raise ValueError(
+            f"asked to act on {n} '{label}' atom(s) but only {available} present.")
+    return n
 
-    rm = [element] if element else None
-    defects = list(VacancyGenerator().generate(structure, rm_species=rm))
-    if not defects:
-        raise ValueError(f"no vacancy site found{f' for {element}' if element else ''}.")
-    defect = defects[0]
-    sc = defect.get_supercell_structure(sc_mat=_sc_matrix(supercell))
-    return sc, getattr(defect, "name", "vacancy")
+
+def create_vacancy(structure, element=None, count=1):
+    """Remove `count` atoms of `element` (or "all" of them) to make vacancies.
+
+    Operates on the current cell — call make_supercell first for a dilute defect.
+    `element` selects the species (defaults to any site); `count` is a number or
+    "all". Removes the lowest-indexed matching sites. Returns (structure, name).
+    """
+    s = structure.copy()
+    if element:
+        idx = list(s.indices_from_symbol(element))
+        if not idx:
+            raise ValueError(f"no '{element}' atom found in the structure.")
+    else:
+        idx = list(range(len(s)))
+    n = _resolve_count(count, len(idx), element or "atom")
+    s.remove_sites(idx[:n])
+    if len(s) == 0:
+        raise ValueError("that would remove every atom — nothing would be left.")
+    label = element or "atom"
+    name = f"{n}x {label} vacancy" if n > 1 else f"{label} vacancy"
+    return s, name
 
 
-def create_substitution(structure, from_element, to_element, supercell=None):
-    """Return a defective supercell with one `from_element` atom replaced by `to_element`."""
-    from pymatgen.analysis.defects.generators import SubstitutionGenerator
+def create_substitution(structure, from_element, to_element, count=1):
+    """Replace `count` `from_element` atoms with `to_element` (or "all" of them).
 
+    Operates on the current cell. `count` is a number or "all"; the lowest-indexed
+    matching sites are substituted. Returns (structure, name).
+    """
     if not from_element or not to_element:
         raise ValueError("from_element and to_element are required.")
-    defects = list(SubstitutionGenerator().generate(
-        structure, substitution={from_element: [to_element]}))
-    if not defects:
-        raise ValueError(f"no '{from_element}' site found to substitute with '{to_element}'.")
-    defect = defects[0]
-    sc = defect.get_supercell_structure(sc_mat=_sc_matrix(supercell))
-    return sc, getattr(defect, "name", "substitution")
+    s = structure.copy()
+    idx = list(s.indices_from_symbol(from_element))
+    if not idx:
+        raise ValueError(f"no '{from_element}' atom found to substitute.")
+    n = _resolve_count(count, len(idx), from_element)
+    for i in idx[:n]:
+        s.replace(i, to_element)
+    name = (f"{n}x {from_element}->{to_element}" if n > 1
+            else f"{from_element}->{to_element}")
+    return s, name
 
 
-def create_interstitial(structure, insert_element, supercell=None):
-    """Return a defective supercell with `insert_element` added at a Voronoi interstitial site."""
+def create_interstitial(structure, insert_element, count=1):
+    """Insert `count` `insert_element` atom(s) at Voronoi interstitial sites.
+
+    Operates on the current cell — call make_supercell first for a dilute defect.
+    Distinct symmetry-inequivalent Voronoi sites are used (lowest-indexed first);
+    `count` is a number or "all". Returns (structure, name).
+    """
     from pymatgen.analysis.defects.generators import VoronoiInterstitialGenerator
 
     if not insert_element:
@@ -73,9 +100,13 @@ def create_interstitial(structure, insert_element, supercell=None):
         structure, insert_species=[insert_element]))
     if not defects:
         raise ValueError(f"no interstitial site found for '{insert_element}'.")
-    defect = defects[0]
-    sc = defect.get_supercell_structure(sc_mat=_sc_matrix(supercell))
-    return sc, getattr(defect, "name", "interstitial")
+    n = _resolve_count(count, len(defects), f"{insert_element} interstitial site")
+    s = structure.copy()
+    for defect in defects[:n]:
+        s.append(insert_element, defect.site.frac_coords, coords_are_cartesian=False)
+    name = (f"{n}x {insert_element} interstitial" if n > 1
+            else f"{insert_element} interstitial")
+    return s, name
 
 
 def analyze_symmetry(structure, symprec=0.01) -> dict:
@@ -280,74 +311,42 @@ def add_vacuum(structure, axis="c", thickness=15.0, side="both"):
                      coords_are_cartesian=True)
 
 
-# ── Exact atomic-layer counting (used when make_slab is given `layers`) ───────
-# Two atoms are on the same atomic plane if their positions along the surface
-# normal differ by less than this (Å). A generous-but-tight tolerance: it absorbs
-# floating-point noise yet keeps genuinely distinct planes (interlayer spacings are
-# typically > 1 Å) separate.
-_PLANE_TOL = 0.10
+# ── Structural-layer stacking (used when make_slab is given `layers`) ─────────
+# In surface science an "N-layer slab" means N complete structural repeat units
+# (oriented unit cells) stacked along the surface normal — one full "thickness"
+# of the crystal — NOT N individual atomic planes. Trimming to atomic planes can
+# split bonded units and break stoichiometry (a MoS2 layer is a whole S–Mo–S
+# trilayer, so 3 layers = 3 trilayers = 9 planes, never 3 planes).
 
 
-def _normal_unit(structure) -> np.ndarray:
-    """Unit vector along the c (out-of-plane) lattice direction."""
-    c = structure.lattice.matrix[2]
-    return c / float(np.linalg.norm(c))
+def _slab_orientation(struct):
+    """Reorient a stacked slab so a, b lie in the xy-plane and c points straight
+    up along the surface normal.
 
-
-def _plane_groups(structure, tol: float = _PLANE_TOL) -> list[list[int]]:
-    """Group site indices into atomic planes along the surface normal (bottom→top).
-
-    Wrap-aware: an atom wrapped just past the periodic boundary would otherwise be
-    miscounted as a separate plane, so we cut the periodic axis at its largest empty
-    region (the vacuum) to form a single contiguous, monotonically increasing block.
+    The oriented unit cell has the two surface vectors as a, b and the (possibly
+    tilted) stacking vector as c. We rotate a, b into the xy-plane, then make c
+    vertical, so downstream tools (POSCAR export, the viewer, adsorbate placement)
+    get the surface normal along c and add_vacuum measures the gap perpendicular
+    to the surface rather than along a tilted c.
     """
-    unit = _normal_unit(structure)
-    c_len = float(np.linalg.norm(structure.lattice.matrix[2]))
-    proj = np.mod(structure.cart_coords @ unit, c_len)
-    order = list(np.argsort(proj))
-    if len(order) == 1:
-        return [[int(order[0])]]
+    from pymatgen.core import Lattice, Structure
 
-    sorted_proj = proj[order]
-    gaps = list(np.diff(sorted_proj)) + [c_len - (sorted_proj[-1] - sorted_proj[0])]
-    cut = int(np.argmax(gaps))  # largest empty region = vacuum; block starts after it
-    start = (cut + 1) % len(order)
-    rolled = order[start:] + order[:start]
+    matrix = struct.lattice.matrix
+    e1 = matrix[0] / float(np.linalg.norm(matrix[0]))
+    e2 = matrix[1] - (matrix[1] @ e1) * e1
+    e2 /= float(np.linalg.norm(e2))
+    e3 = np.cross(e1, e2)              # surface normal (right-handed with a, b)
+    rot = np.array([e1, e2, e3])      # rows: new basis expressed in old coords
 
-    base = proj[rolled[0]]
-    pos = np.mod(proj[rolled] - base, c_len)
-    groups: list[list[int]] = [[int(rolled[0])]]
-    last = pos[0]
-    for k in range(1, len(rolled)):
-        if pos[k] - last <= tol:
-            groups[-1].append(int(rolled[k]))
-        else:
-            groups.append([int(rolled[k])])
-        last = pos[k]
-    return groups
+    new_matrix = matrix @ rot.T
+    new_coords = struct.cart_coords @ rot.T
+    new_matrix[2] = [0.0, 0.0, abs(new_matrix[2][2])]  # c straight up along normal
 
-
-def _enforce_layer_count(slab, n_layers: int, tol: float = _PLANE_TOL):
-    """Trim the slab to exactly ``n_layers`` distinct atomic planes (from the top).
-
-    Raises if the generated slab has fewer planes than requested (caller should ask
-    for a thicker slab — should not happen given unit-plane over-generation).
-    """
-    groups = _plane_groups(slab, tol)
-    n_planes = len(groups)
-    if n_planes < n_layers:
-        raise ValueError(
-            f"the generated slab has only {n_planes} atomic plane(s) but "
-            f"{n_layers} were requested; try a smaller layers or a different "
-            "Miller index.")
-    if n_planes == n_layers:
-        return slab
-    drop: list[int] = []
-    for grp in groups[n_layers:]:
-        drop.extend(grp)
-    slab = slab.copy()
-    slab.remove_sites(sorted(drop))
-    return slab
+    slab = Structure(Lattice(new_matrix), struct.species, new_coords,
+                     coords_are_cartesian=True)
+    frac = slab.frac_coords
+    frac[:, :2] %= 1.0                # wrap in-plane only; keep the slab intact along c
+    return Structure(slab.lattice, slab.species, frac)
 
 
 def make_slab(structure, miller="1 1 1", min_slab_size=10.0, min_vacuum_size=15.0,
@@ -359,11 +358,12 @@ def make_slab(structure, miller="1 1 1", min_slab_size=10.0, min_vacuum_size=15.
     against the conventional cell, so the bulk is converted to its conventional
     standard form first (falling back to the input if symmetry analysis fails).
 
-    If ``layers`` is given, the slab is sized to EXACTLY that many distinct atomic
-    planes along the surface normal (the slab is over-generated in unit-plane mode,
-    then the excess planes are trimmed from the top). This is what users mean by
-    "N-layer slab"; ``min_slab_size`` (a thickness in Å) is ignored in that case.
-    Without ``layers`` the original Å-thickness behaviour is unchanged.
+    If ``layers`` is given, the slab is EXACTLY that many complete structural
+    repeat units (oriented unit cells) stacked along the surface normal — one full
+    "thickness" of the crystal per layer, so stoichiometry and bonded units stay
+    intact (a MoS2 "3-layer" slab is 3 whole S–Mo–S trilayers). This is what users
+    mean by "N-layer slab"; ``min_slab_size`` (a thickness in Å) is ignored in that
+    case. Without ``layers`` the original Å-thickness behaviour is unchanged.
     """
     from pymatgen.core.surface import SlabGenerator
     from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
@@ -381,19 +381,24 @@ def make_slab(structure, miller="1 1 1", min_slab_size=10.0, min_vacuum_size=15.
         n_layers = int(layers)
         if n_layers < 1:
             raise ValueError("layers must be a positive integer.")
-        if float(min_vacuum_size) <= 0:
-            raise ValueError("min_vacuum_size must be > 0 Å.")
-        # In unit-plane mode SlabGenerator interprets BOTH sizes as plane counts, so
-        # we request a tiny placeholder vacuum here and set the real Å gap afterwards.
-        # lll_reduce is forced off: it can tilt the c-vector off the surface normal,
-        # which would make the atomic-plane count unreliable. (lll_reduce is ignored
-        # when layers is set.)
+        # Build ONE complete repeat (the oriented unit cell), apply the termination
+        # shift, then stack it n_layers times along the normal — so N layers is N
+        # whole structural units, not N atomic planes. lll_reduce is forced off: it
+        # can tilt the c-vector off the surface normal and scramble the stacking
+        # (lll_reduce is ignored when layers is set). The tiny vacuum here is a
+        # placeholder; the real Å gap is added after reorientation.
         sg = SlabGenerator(
-            conv, hkl, min_slab_size=n_layers, min_vacuum_size=1,
+            conv, hkl, min_slab_size=1, min_vacuum_size=1,
             in_unit_planes=True, lll_reduce=False,
             center_slab=False, primitive=False, reorient_lattice=True,
         )
-        slab = _enforce_layer_count(sg.get_slab(shift=float(shift)), n_layers)
+        repeat = sg.oriented_unit_cell.copy()
+        if float(shift):
+            frac = repeat.frac_coords
+            frac[:, 2] = np.mod(frac[:, 2] + float(shift), 1.0)  # select termination
+            repeat = repeat.__class__(repeat.lattice, repeat.species, frac)
+        repeat.make_supercell([[1, 0, 0], [0, 1, 0], [0, 0, n_layers]])
+        slab = _slab_orientation(repeat)
         side = "both" if center_slab else "top"
         return add_vacuum(slab, axis="c", thickness=float(min_vacuum_size), side=side)
 
@@ -405,3 +410,23 @@ def make_slab(structure, miller="1 1 1", min_slab_size=10.0, min_vacuum_size=15.
         primitive=True, reorient_lattice=True,
     )
     return sg.get_slab(shift=float(shift))
+
+
+def has_vacuum_gap(structure, min_gap: float = 5.0) -> bool:
+    """True if the cell has a large empty gap along any axis — i.e. the structure is
+    already a slab, 2D layer or molecule rather than a space-filling bulk crystal.
+
+    Used to auto-detect whether add_adsorbate must build a slab first (bulk input)
+    or can adsorb directly (the structure is already a surface).
+    """
+    if len(structure) < 2:
+        return True
+    for i in range(3):
+        vec = structure.lattice.matrix[i]
+        length = float(np.linalg.norm(vec))
+        proj = np.sort(structure.cart_coords @ (vec / length))
+        biggest = float(np.max(np.diff(proj)))                 # largest interior gap
+        wrap = length - float(proj[-1] - proj[0])              # gap across the boundary
+        if max(biggest, wrap) >= min_gap:
+            return True
+    return False

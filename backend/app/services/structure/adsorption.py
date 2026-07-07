@@ -85,8 +85,28 @@ def _as_site_finder(slab):
     return AdsorbateSiteFinder(slab)
 
 
+def _validate_atom_index(slab, atom_index) -> int:
+    """Bounds-check a user-supplied 0-based atom index against ``slab``.
+
+    Raises a friendly ``ValueError`` (surfaced to the user as "can't adsorb without
+    a valid position") when the index is missing/non-integer/out of range.
+    """
+    n = len(slab)
+    try:
+        ai = int(atom_index)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"atom_index must be a whole number (0–{n - 1}), got {atom_index!r}.")
+    if ai < 0 or ai >= n:
+        raise ValueError(
+            f"atom_index {ai} is out of range — this structure has {n} atoms, so "
+            f"valid indices are 0–{n - 1}. Cannot adsorb without a valid position.")
+    return ai
+
+
 def place_adsorbate(slab, molecule: str, site_type: str = "ontop",
-                    distance: float = 2.0, position_index: int = 0):
+                    distance: float = 2.0, position_index: int = 0,
+                    atom_index: Optional[int] = None):
     """Place ``molecule`` on ``slab`` at an adsorption site (geometric, no relaxation).
 
     Args:
@@ -96,15 +116,29 @@ def place_adsorbate(slab, molecule: str, site_type: str = "ontop",
         distance:       height of the adsorbate above the surface site (Å).
         position_index: which site of that type to use, ordered from the topmost
                         surface downward (default 0 = the highest/true top site).
+        atom_index:     if given, ignore ``site_type`` and place the adsorbate
+                        directly above this 0-based slab atom (validated in range).
 
     Returns the combined slab+adsorbate ``Structure``.
     """
+    mol = _build_molecule(molecule)
+    asf = _as_site_finder(slab)
+
+    # Out-of-plane (c) normal — used both to lift the adsorbate above a chosen atom
+    # and to order symmetry sites top-down below.
+    c = slab.lattice.matrix[2]
+    normal = c / float(np.linalg.norm(c))
+
+    # ── Explicit atom target: drop the molecule straight above that atom ──────────
+    if atom_index is not None:
+        ai = _validate_atom_index(slab, atom_index)
+        target = np.asarray(slab[ai].coords) + float(distance) * normal
+        return asf.add_adsorbate(mol, target)
+
     st = str(site_type or "ontop").lower().strip()
     if st not in _SITE_TYPES:
         raise ValueError('site_type must be "ontop", "bridge" or "hollow".')
 
-    mol = _build_molecule(molecule)
-    asf = _as_site_finder(slab)
     sites = asf.find_adsorption_sites(
         distance=float(distance), positions=(st,), symm_reduce=0.01)
     coords = sites.get(st) or sites.get("all") or []
@@ -116,8 +150,6 @@ def place_adsorbate(slab, molecule: str, site_type: str = "ontop",
     # normal. A trimmed/asymmetric slab can expose inequivalent top *and* bottom
     # sites; without this, position_index=0 could land on a buried lower-surface
     # site and bury the adsorbate inside the slab. index 0 == the true top site.
-    c = slab.lattice.matrix[2]
-    normal = c / float(np.linalg.norm(c))
     coords = sorted(coords, key=lambda p: float(np.asarray(p) @ normal), reverse=True)
     idx = max(0, min(int(position_index), len(coords) - 1))
     return asf.add_adsorbate(mol, coords[idx])

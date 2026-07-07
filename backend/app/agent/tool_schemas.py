@@ -29,7 +29,7 @@ from app.tools.contracts import (
     GenerateSqsInput,
     GenerateVaspInputsInput,
     ListFilesInput,
-    ListMigrationPathsInput,
+    ListSublatticesInput,
     ListModelsInput,
     MakeSlabInput,
     MakeSupercellInput,
@@ -45,7 +45,9 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
         "Search the Materials Project, C2DB and OQMD databases for materials by "
         "formula, element(s) or property filters. Returns matching structures "
         "with ids you can pass to generate_vasp_inputs. Use this first whenever "
-        "the user names a material by formula rather than by database id."
+        "the user names a material by formula rather than by database id. When the "
+        "user asks for a 2D material, monolayer, or 2-dimensional structure, set "
+        "dimensionality='2D' so the search prefers the C2DB 2D-materials database."
     ),
     "generate_vasp_inputs": (
         "Generate a complete VASP input set (POSCAR + INCAR + KPOINTS) for a "
@@ -65,12 +67,15 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
         "structure. Use generate_vasp_inputs instead for the full input set."
     ),
     "generate_kpoints": (
-        "Write ONLY a VASP KPOINTS file at a chosen accuracy level. `accuracy_level` "
-        "sets the k-points-per-atom density: 'Low' (1000), 'Medium' (3000, default), "
-        "'High' (5000), or 'Custom' (then set `custom_kppa`). `gamma_centered=true` "
-        "(default) writes a Γ-centered mesh, false writes Monkhorst-Pack. Operates on "
-        "the active POSCAR by default, or pass poscar_path / material_id. Use "
-        "generate_vasp_inputs instead for the full POSCAR+INCAR+KPOINTS+POTCAR set."
+        "Write ONLY a VASP KPOINTS file. `accuracy_level` sets the k-points-per-atom "
+        "density: 'Low' (1000), 'Medium' (3000, default), 'High' (5000), or 'Custom' "
+        "(then set `custom_kppa`). When the user asks for an EXACT grid (e.g. '1 1 1', "
+        "'2 2 2', 'gamma only'), pass `explicit_mesh` ('2 2 2') instead — it writes "
+        "that grid verbatim and overrides accuracy; the coarsest possible mesh is "
+        "1 1 1 (a single Γ point), it cannot go lower. `gamma_centered=true` (default) "
+        "writes a Γ-centered mesh, false writes Monkhorst-Pack. Operates on the active "
+        "POSCAR by default, or pass poscar_path / material_id. Use generate_vasp_inputs "
+        "instead for the full POSCAR+INCAR+KPOINTS+POTCAR set."
     ),
     "make_supercell": (
         "Replicate a crystal cell into a supercell and save it as the active POSCAR "
@@ -91,8 +96,9 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
     ),
     "make_slab": (
         "Cut a surface slab along `miller` (e.g. '1 1 1'), saved as the active POSCAR. "
-        "Set `layers` for an EXACT atomic-layer count (what the user means by 'N "
-        "layers'); otherwise the slab is `min_slab_size` Å thick. Vacuum "
+        "Set `layers` for an EXACT count of complete structural repeat units — one "
+        "full crystal thickness per layer, keeping stoichiometry intact (what the user "
+        "means by 'N layers'); otherwise the slab is `min_slab_size` Å thick. Vacuum "
         "(`min_vacuum_size` Å) is INCLUDED, so do not also call add_vacuum. `shift` "
         "selects the surface termination. For an in-plane supercell, call make_supercell "
         "afterwards (e.g. '2 2 1'); to change the vacuum precisely use add_vacuum. So 'a "
@@ -104,10 +110,17 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
         "Adsorb a molecule (e.g. CO2, CO, H2O, O, H) onto the active surface slab. By "
         "default it places the molecule geometrically on an auto-picked site (first "
         "symmetry-reduced `site_type`, 'ontop' by default) at `distance` Å above the "
-        "surface and saves it as the active POSCAR (fast). Set `relax=true` for an "
-        "accurate AdsorbML-style background job that enumerates placements, relaxes them "
-        "with an ML potential, and returns the lowest adsorption-energy structure (returns "
-        "a job_id). The active structure should be a slab first (make_slab)."
+        "surface and saves it as the active POSCAR (fast). To place it on a PARTICULAR "
+        "atom the user names, pass that atom's 0-based `atom_index` (overrides site_type). "
+        "First read the structure and confirm the index is valid; if the user gives no "
+        "valid atom/position, do NOT guess — tell them you cannot adsorb without a valid "
+        "position. Set `relax=true` for an accurate AdsorbML-style background job that "
+        "enumerates placements, relaxes them with an ML potential, and returns the lowest "
+        "adsorption-energy structure (returns a job_id; atom_index is not used in this "
+        "mode). The input may be a bulk crystal OR a slab: `material_type` is 'auto' by "
+        "default (cuts a slab only when the input is bulk); pass 'bulk' to force a slab cut "
+        "(along `miller`, `layers` thick) or 'slab' to adsorb the structure as-is. No need "
+        "to call make_slab first for a bulk input."
     ),
     "convert_structure": (
         "Write a structure in another file format (`to_format`: poscar/cif/xyz/cssr/"
@@ -122,19 +135,25 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
         "symmetry, or wants the primitive/conventional cell."
     ),
     "create_vacancy": (
-        "Create a point vacancy (remove one atom) in a supercell and save it as the "
-        "active POSCAR. `element` picks which species to remove; `supercell` (e.g. "
-        "'2 2 2') sizes the cell, or omit it to auto-size for defect isolation. Make "
-        "it charged afterwards via generate_vasp_inputs(charge=...)."
+        "Remove atoms to make vacancies, saved as the active POSCAR. `element` picks "
+        "which species to remove; `count` is how many — a number like '3' or 'all' "
+        "(default 1). Operates on the current cell, so call make_supercell first if "
+        "you want a dilute, isolated defect. Make it charged afterwards via "
+        "generate_vasp_inputs(charge=...)."
     ),
     "create_substitution": (
-        "Create a substitutional defect — replace one `from_element` atom with "
-        "`to_element` — in a supercell, saved as the active POSCAR. `supercell` "
-        "optional (auto-sizes if omitted)."
+        "Replace atoms of one element with another, saved as the active POSCAR — "
+        "replace `from_element` with `to_element`. `count` is how many to replace — a "
+        "number like '3' or 'all' (default 1). E.g. vacate 3 Si then substitute 3 more "
+        "with Mg = create_vacancy(element='Si', count='3') then "
+        "create_substitution(from_element='Si', to_element='Mg', count='3'). Operates "
+        "on the current cell."
     ),
     "create_interstitial": (
-        "Insert `insert_element` at a Voronoi interstitial site in a supercell, saved "
-        "as the active POSCAR. `supercell` optional (auto-sizes if omitted)."
+        "Insert atoms at Voronoi interstitial sites, saved as the active POSCAR — "
+        "`insert_element` is the species to add. `count` is how many to insert — a "
+        "number like '3' or 'all' (default 1). Operates on the current cell, so call "
+        "make_supercell first if you want a dilute, isolated defect."
     ),
     "read_file": (
         "Read and parse a file the user uploaded into this session. Structure "
@@ -174,25 +193,31 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
         "structure (finite-displacement via phonopy) with a machine-learned "
         "potential. Long-running: returns a job_id and runs in the background."
     ),
-    "generate_sqs": (
-        "Generate a Special Quasi-random Structure (SQS) for a disordered alloy "
-        "using ATAT mcsqs. To turn an ORDERED structure into a disordered one, "
-        "pass `substitute` (e.g. \"Se->S:0.25\" = replace 25% of Se with S) — this "
-        "is the tool for requests like 'substitute 25% of Se with S using SQS'. "
-        "Operates on the active/most-recent session structure. Long-running: "
-        "returns a job_id and runs in the background."
+    "list_sublattices": (
+        "List the symmetry-distinct sublattices (Wyckoff sites) of a session "
+        "structure — which element sits on each site and how many there are. Use "
+        "this BEFORE generate_sqs so the user can choose a site to make into a "
+        "random alloy (e.g. SrTiO3 → Sr, Ti and O sublattices). Fast."
     ),
-    "list_migration_paths": (
-        "List candidate ion migration hops (source/dest site pairs) for a given "
-        "element in a session structure, so the user can pick one for compute_neb. "
-        "Use this before compute_neb when the hop is not yet specified."
+    "generate_sqs": (
+        "Generate a Special Quasi-random Structure (SQS) for a random alloy using "
+        "ATAT mcsqs, starting from a NORMAL ordered structure. Define the alloy "
+        "with `sublattice_comp`: a per-sublattice target composition like "
+        "\"Ti=Ti0.6,Zr0.4\" (60% Ti / 40% Zr on the Ti site) or two at once "
+        "\"Ti=Ti0.6,Zr0.4; Sr=Sr0.6,Ba0.4\". Call list_sublattices first to see the "
+        "site names. This is the tool for requests like 'make an SQS of SrTiO3 with "
+        "40% Zr on the Ti site'. The result is relaxed with an ML potential. "
+        "Long-running: returns a job_id and runs in the background."
     ),
     "compute_neb": (
-        "Run a Nudged Elastic Band (NEB) calculation of a migration barrier "
-        "between two endpoints with a machine-learned potential. Provide either a "
-        "final_poscar_name or source_site/dest_site labels (from "
-        "list_migration_paths). Long-running: returns a job_id and runs in the "
-        "background."
+        "Run a Nudged Elastic Band (NEB) calculation of an ion migration barrier "
+        "with a machine-learned potential. Two ways to specify the hop: pass a "
+        "final_poscar_name (an end-state structure), OR pass migrating_element "
+        "(e.g. 'Mg') and the tool auto-builds the vacancy-mediated endpoints — it "
+        "picks the shortest hop unless you also give source_site/dest_site labels "
+        "(1..N in structure order). It relaxes the endpoints, finds the minimum-"
+        "energy path, confirms the saddle with a Hessian, and can emit VASP decks. "
+        "Long-running: returns a job_id and runs in the background."
     ),
 }
 
@@ -218,8 +243,8 @@ _TOOL_MODELS: list[tuple[str, type[BaseModel]]] = [
     ("run_md_simulation", RunMdSimulationInput),
     ("compute_elastic_tensor", ComputeElasticInput),
     ("compute_phonons", ComputePhononInput),
+    ("list_sublattices", ListSublatticesInput),
     ("generate_sqs", GenerateSqsInput),
-    ("list_migration_paths", ListMigrationPathsInput),
     ("compute_neb", ComputeNebInput),
 ]
 

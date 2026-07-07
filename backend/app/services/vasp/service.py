@@ -78,13 +78,19 @@ class VaspService:
 
         # POTCAR.spec (+ real POTCAR if a licensed PAW dir is configured) → ENCUT
         potcar = write_potcar_spec(structure, out_dir)
-        encut = int(overrides.get("ENCUT")
-                    or max(_DEFAULT_ENCUT, potcar.recommended_encut or 0))
+        # ENCUT defaults to 520 eV every time (MP-consistent). The POTCAR-derived
+        # recommended floor is still emitted in POTCAR.spec as a note, but no longer
+        # bumps the INCAR; pass an explicit ENCUT override to raise it per-run.
+        encut = int(overrides.get("ENCUT") or _DEFAULT_ENCUT)
         overrides["ENCUT"] = encut
 
         # charge → NELECT (needs the POTCAR valence counts), plus modifier warnings.
         charge = float(modifiers.pop("charge", 0.0) or 0.0)
         warnings = list(potcar.warnings)
+        if potcar.recommended_encut and potcar.recommended_encut > encut:
+            warnings.append(
+                f"ENCUT={encut} eV (default); POTCAR floor is {potcar.recommended_encut} eV. "
+                f"Pass ENCUT={potcar.recommended_encut} to raise it if you need that accuracy.")
         nelect = None
         if charge:
             nelect, neutral = _compute_nelect(structure, potcar, charge)

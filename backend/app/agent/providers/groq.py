@@ -15,6 +15,7 @@ import uuid
 
 from groq import AsyncGroq
 
+from app.agent.providers._keypool import build_pool, run_with_rotation
 from app.agent.providers.base import LLMProvider, LLMResult, OnText, ToolCall, ToolSpec
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -80,11 +81,22 @@ def _to_tools(tools: list[ToolSpec]) -> list[dict]:
 class GroqProvider(LLMProvider):
     name = "groq"
 
-    def __init__(self, model: str | None = None, max_retries: int = 3):
+    def __init__(self, model: str | None = None, max_retries: int = 0):
         self.model = model or settings.groq_model
-        # Default 3: the SDK smooths over free-tier per-minute bursts in
-        # production. Benchmarks/key-rotation can set 0 to fail fast on 429.
+        # Default 0: with multi-key rotation (_keypool) + provider fallback doing
+        # the resilience, a 429 should rotate to the next key immediately rather
+        # than have the SDK sleep on an already-exhausted key (its Retry-After can
+        # be hours for the daily token cap). Benchmarks can raise this.
         self.max_retries = max_retries
+
+    def _key_pool(self) -> list[str]:
+        """Ordered Groq key pool: per-user BYOK / startup key first, then the
+        operator's rotation pool (``GROQ_API_KEYS``). Rotated on 429."""
+        # Read os.environ FIRST so a per-request BYOK key (injected by
+        # key_service.load_user_keys_into_env) is honoured; fall back to the
+        # boot-time settings value. Mirrors the gemini provider.
+        singular = os.getenv("GROQ_API_KEY") or settings.groq_api_key
+        return build_pool(singular, os.getenv("GROQ_API_KEYS"))
 
     async def run(
         self,
@@ -92,19 +104,24 @@ class GroqProvider(LLMProvider):
         tools: list[ToolSpec],
         on_text: OnText,
     ) -> LLMResult:
-        # Read os.environ FIRST so a per-request BYOK key (injected by
-        # key_service.load_user_keys_into_env) is honoured; fall back to the
-        # boot-time settings value. Mirrors the gemini provider.
-        key = os.getenv("GROQ_API_KEY") or settings.groq_api_key
-        if not key:
+        pool = self._key_pool()
+        if not pool:
             raise RuntimeError(
                 "GROQ_API_KEY is not set. Add a Groq key (free at "
                 "https://console.groq.com/keys) or set MODEL_PROVIDER=gemini|ollama."
             )
+        return await run_with_rotation(
+            "groq", pool, on_text,
+            lambda key, ot: self._run_once(key, messages, tools, ot),
+        )
 
-        # max_retries: the SDK retries transient 429/5xx with exponential backoff and
-        # honours the server's Retry-After header, smoothing over free-tier per-minute
-        # bursts before the agent falls back to the next provider.
+    async def _run_once(
+        self,
+        key: str,
+        messages: list[dict],
+        tools: list[ToolSpec],
+        on_text: OnText,
+    ) -> LLMResult:
         client = AsyncGroq(api_key=key, max_retries=self.max_retries)
 
         text_acc: list[str] = []

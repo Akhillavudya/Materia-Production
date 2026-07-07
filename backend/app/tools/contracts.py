@@ -27,7 +27,7 @@ class SearchMaterialsInput(BaseModel):
     max_formation_e: Optional[float] = Field(
         None, description="maximum formation energy [eV/atom]")
     dimensionality: Optional[str] = Field(
-        None, description='"2D" or "3D" filter (optional)')
+        None, description='"2D" (searches C2DB first) or "3D"; set "2D" for monolayers/2D materials')
     limit: int = Field(10, description="max results to return (1-20)")
 
 
@@ -180,9 +180,10 @@ class ComputeNebInput(BaseModel):
     migrating_element: Optional[str] = Field(
         None, description='migrating atom, e.g. "Mg" — auto-builds the vacancy-'
                           'mediated initial/final endpoints instead of needing a '
-                          'final file. Use list_migration_paths to pick a hop.')
+                          'final file. Auto-picks the shortest hop unless you pass '
+                          'source_site/dest_site.')
     source_site: Optional[int] = Field(
-        None, description="source site label (1..N from list_migration_paths); "
+        None, description="source site label (1..N in structure order); "
                           "defaults to the shortest candidate hop")
     dest_site: Optional[int] = Field(
         None, description="destination site label (1..N); defaults with source_site "
@@ -190,11 +191,15 @@ class ComputeNebInput(BaseModel):
     symprec: float = Field(
         0.1, description="symmetry tolerance (Å) for finding distinct migrating sites")
     n_images: int = Field(
-        7, ge=3, le=15,
+        8, ge=3, le=15,
         description="number of interior images between the two endpoints "
                     "(more = smoother path, slower)")
     fmax: float = Field(
         0.05, description="force convergence threshold [eV/Å] for the band")
+    endpoint_fmax: float = Field(
+        0.03, description="tight force threshold [eV/Å] the endpoints are relaxed "
+                          "to (FIRE→BFGS) so the barrier is measured between true "
+                          "minima")
     max_steps: int = Field(
         300, ge=1, le=settings.max_opt_steps,
         description="maximum NEB optimizer steps")
@@ -207,6 +212,14 @@ class ComputeNebInput(BaseModel):
         True, description="relax both endpoints (ions only) before the NEB so the "
                           "barrier is measured between true local minima")
     optimizer: str = Field("FIRE", description='"FIRE" | "BFGS" | "LBFGS"')
+    run_frequencies: bool = Field(
+        True, description="after the band, run a finite-difference Hessian on the "
+                          "saddle image (cell fixed, positions only) to confirm the "
+                          "transition state — exactly one imaginary mode = true TS")
+    emit_vasp_inputs: bool = Field(
+        True, description="also emit ready-to-submit VASP decks (INCAR/KPOINTS/POTCAR "
+                          "spec + the 00..0N image folders) for the endpoint relax, "
+                          "NEB, and Hessian stages, bundled as a zip")
     calculator_type: str = Field("mace", description=_CALC_TYPE_DESC)
     calculator_model: Optional[str] = Field(None, description=_CALC_MODEL_DESC)
 
@@ -230,19 +243,32 @@ class ListMigrationPathsInput(BaseModel):
 
 # ── 5.7 generate_sqs ──────────────────────────────────────────────────────────
 
+class ListSublatticesInput(BaseModel):
+    cif_name: Optional[str] = Field(
+        None, description="structure file in the session; uses the active structure "
+                          "if omitted")
+    symprec: float = Field(
+        0.1, description="symmetry tolerance (Å) for grouping sites into Wyckoff "
+                         "sublattices")
+
+
 class GenerateSqsInput(BaseModel):
     cif_name: Optional[str] = Field(
-        None, description="disordered CIF in the session (partial site occupancies); "
-                          "auto-detects the most recent structure file if omitted")
+        None, description="structure in the session — an ORDERED POSCAR/CIF is fine "
+                          "(auto-detects the active structure if omitted)")
+    sublattice_comp: Optional[str] = Field(
+        None, description='PREFERRED: per-sublattice target composition to build the '
+                          'random alloy from an ordered parent, e.g. "Ti=Ti0.6,Zr0.4" '
+                          '(put 60%% Ti / 40%% Zr on the Ti sublattice) or two at once '
+                          '"Ti=Ti0.6,Zr0.4; Sr=Sr0.6,Ba0.4". Call list_sublattices '
+                          'first to see the site names. This is the tool for requests '
+                          'like "make an SQS of SrTiO3 with 40%% Zr on the Ti site".')
     target_comp: Optional[str] = Field(
-        None, description='optional target composition override, e.g. '
-                          '"Li:1,Ni:0.8,Mn:0.1,Co:0.1,O:2"')
+        None, description='optional target composition override for a disordered CIF, '
+                          'e.g. "Li:1,Ni:0.8,Mn:0.1,Co:0.1,O:2"')
     substitute: Optional[str] = Field(
-        None, description='turn an ORDERED structure into a disordered one for SQS by '
-                          'partially substituting an element, e.g. "Si->S:0.25" means '
-                          '"replace 25% of Si with S". Multiple allowed, comma-separated '
-                          '("Si->S:0.25, Mg->Ca:0.1"). Use this for requests like '
-                          '"substitute 25% of Si with S in MgSi2Se4 using SQS".')
+        None, description='LEGACY alt to sublattice_comp: partially substitute an '
+                          'element, e.g. "Si->S:0.25" = "replace 25%% of Si with S".')
     supercell: str = Field(
         "2 2 2", description='SQS supercell size, e.g. "5 2 1" or "2 2 2"')
     cutoff: Optional[float] = Field(
@@ -256,6 +282,13 @@ class GenerateSqsInput(BaseModel):
         description="search time budget in SECONDS — the max time to spend before taking "
                     "the best result so far. A user phrase like '30 second time budget' "
                     "means time_budget_s=30.")
+    relax: bool = Field(
+        True, description="after the search, relax the SQS supercell with an ML "
+                          "potential (recommended)")
+    calculator_type: str = Field(
+        "mace", description='ML potential for the relaxation: "mace" or "mattersim"')
+    calculator_model: Optional[str] = Field(
+        None, description="specific model variant for the relaxation (optional)")
 
 
 # ── 14.5 generate_poscar ──────────────────────────────────────────────────────
@@ -281,6 +314,11 @@ class GenerateKpointsInput(BaseModel):
     custom_kppa: Optional[int] = Field(
         None, ge=1,
         description='k-points per atom; required when accuracy_level="Custom"')
+    explicit_mesh: Optional[str] = Field(
+        None,
+        description='exact Γ mesh, e.g. "2 2 2" or "1 1 1". Overrides accuracy_level/'
+                    'custom_kppa and writes that grid verbatim. A mesh cannot be '
+                    'reduced below 1 1 1 (a single Γ point).')
     material_id: Optional[str] = Field(
         None, description="optional: use a database structure instead of a session file")
     source: Optional[str] = Field(
@@ -324,7 +362,9 @@ class MakeSlabInput(_StructureSourceInput):
         "1 1 1", description='Miller index of the surface, e.g. "1 1 1"')
     layers: Optional[int] = Field(
         None,
-        description="exact number of atomic layers (planes) — set this when the user "
+        description="exact number of structural layers — complete repeat units "
+                    "(each layer is one full periodic thickness, e.g. an S–Mo–S "
+                    'trilayer), not single atomic planes — set this when the user '
                     'asks for "N layers"; it overrides min_slab_size')
     min_slab_size: float = Field(
         10.0, description="minimum slab thickness in Å (ignored when layers is set)")
@@ -343,6 +383,10 @@ class AddAdsorbateInput(_StructureSourceInput):
         ..., description='adsorbate molecule formula, e.g. "CO2", "CO", "H2O", "O", "H"')
     site_type: str = Field(
         "ontop", description='adsorption site: "ontop" (default), "bridge" or "hollow"')
+    atom_index: Optional[int] = Field(
+        None, description="0-based index of a specific slab atom to place the adsorbate "
+                          "directly above; overrides site_type. Must be a valid atom "
+                          "index for the structure (fast geometric mode only)")
     distance: float = Field(
         2.0, gt=0, description="height of the adsorbate above the surface site, in Å")
     relax: bool = Field(
@@ -355,6 +399,20 @@ class AddAdsorbateInput(_StructureSourceInput):
         None, description='ML potential for relax mode: "mace" (default) or "mattersim"')
     calculator_model: Optional[str] = Field(
         None, description="specific model name for relax mode (optional)")
+    material_type: str = Field(
+        "auto",
+        description='is the input a bulk crystal or a surface slab? "slab" adsorbs it '
+                    'as-is; "bulk" cuts a slab first; "auto" (default) detects and cuts '
+                    'a slab only for a bulk crystal')
+    miller: str = Field(
+        "1 1 1", description='Miller index of the surface to cut when building a slab '
+                             "from a bulk input (ignored if the input is already a slab)")
+    layers: int = Field(
+        4, gt=0, description="number of structural layers for the slab built from a bulk "
+                             "input (ignored if the input is already a slab)")
+    min_vacuum_size: float = Field(
+        15.0, gt=0, description="vacuum gap in Å for the slab built from a bulk input "
+                                "(ignored if the input is already a slab)")
 
 
 class ConvertStructureInput(_StructureSourceInput):
@@ -382,8 +440,8 @@ class AnalyzeSymmetryInput(BaseModel):
 class CreateVacancyInput(BaseModel):
     element: Optional[str] = Field(
         None, description="element to remove (defaults to the first site found)")
-    supercell: Optional[str] = Field(
-        None, description='supercell size, e.g. "2 2 2" (omit to auto-size for isolation)')
+    count: Optional[str] = Field(
+        None, description='how many atoms to remove: a number like "3", or "all" (default 1)')
     poscar_path: Optional[str] = Field(
         None, description="session structure to use (defaults to the active POSCAR)")
     material_id: Optional[str] = Field(
@@ -395,8 +453,8 @@ class CreateVacancyInput(BaseModel):
 class CreateSubstitutionInput(BaseModel):
     from_element: str = Field(..., description="element being replaced, e.g. \"Si\"")
     to_element: str = Field(..., description="replacement element, e.g. \"Al\"")
-    supercell: Optional[str] = Field(
-        None, description='supercell size, e.g. "2 2 2" (omit to auto-size)')
+    count: Optional[str] = Field(
+        None, description='how many atoms to replace: a number like "3", or "all" (default 1)')
     poscar_path: Optional[str] = Field(
         None, description="session structure to use (defaults to the active POSCAR)")
     material_id: Optional[str] = Field(
@@ -407,8 +465,8 @@ class CreateSubstitutionInput(BaseModel):
 
 class CreateInterstitialInput(BaseModel):
     insert_element: str = Field(..., description="element to insert, e.g. \"H\" or \"Li\"")
-    supercell: Optional[str] = Field(
-        None, description='supercell size, e.g. "2 2 2" (omit to auto-size)')
+    count: Optional[str] = Field(
+        None, description='how many atoms to insert: a number like "3", or "all" (default 1)')
     poscar_path: Optional[str] = Field(
         None, description="session structure to use (defaults to the active POSCAR)")
     material_id: Optional[str] = Field(

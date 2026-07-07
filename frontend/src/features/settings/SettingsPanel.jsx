@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { listKeys, saveApiKey, deleteKey } from '../../api/keys'
+import { listKeys, saveApiKey, deleteKey, deleteKeyAt } from '../../api/keys'
 
 // Provider catalogue. `level` drives the Required / Recommended / Optional pill
 // and the onboarding priority. Keep copy short — the goal is a first-time user
@@ -52,7 +52,7 @@ export default function SettingsPanel({ onClose }) {
     try {
       const rows = await listKeys()
       const map = {}
-      for (const r of rows) map[r.service] = r.exists
+      for (const r of rows) map[r.service] = r   // { service, exists, count, keys }
       setStatus(map)
     } catch {
       /* leave status as-is; rows just show "not set" */
@@ -109,7 +109,7 @@ export default function SettingsPanel({ onClose }) {
                 <li>Generate a new API key.</li>
                 <li>Copy the key.</li>
                 <li>Paste it into the field below.</li>
-                <li>Click <strong>Save</strong> (or <strong>Replace</strong>).</li>
+                <li>Click <strong>Save</strong>. Add more keys anytime with <strong>+ Add key</strong>.</li>
               </ol>
             )}
           </div>
@@ -119,7 +119,7 @@ export default function SettingsPanel({ onClose }) {
             <ProviderCard
               key={p.id}
               p={p}
-              isSet={!!status[p.id]}
+              row={status[p.id]}
               loading={loading}
               onChanged={refresh}
             />
@@ -130,7 +130,7 @@ export default function SettingsPanel({ onClose }) {
   )
 }
 
-function ProviderCard({ p, isSet, loading, onChanged }) {
+function ProviderCard({ p, row, loading, onChanged }) {
   const [value, setValue] = useState('')
   const [show, setShow] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -138,7 +138,13 @@ function ProviderCard({ p, isSet, loading, onChanged }) {
   const [error, setError] = useState(null)
   const lvl = LEVEL[p.level]
 
-  async function handleSave() {
+  const keys = row?.keys || []
+  const count = keys.length
+  const isSet = count > 0
+  // Only the LLM providers pool + rotate keys; MP just uses one.
+  const pooled = p.id === 'gemini' || p.id === 'groq'
+
+  async function handleAdd() {
     if (!value.trim() || busy) return
     setBusy(true); setError(null); setSaved(false)
     try {
@@ -153,14 +159,27 @@ function ProviderCard({ p, isSet, loading, onChanged }) {
     }
   }
 
-  async function handleRemove() {
+  async function handleRemoveOne(index) {
+    if (busy) return
+    setBusy(true); setError(null)
+    try {
+      await deleteKeyAt(p.id, index)
+      await onChanged()
+    } catch (err) {
+      setError(err.message || 'Could not remove key')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleRemoveAll() {
     if (busy) return
     setBusy(true); setError(null)
     try {
       await deleteKey(p.id)
       await onChanged()
     } catch (err) {
-      setError(err.message || 'Could not remove key')
+      setError(err.message || 'Could not remove keys')
     } finally {
       setBusy(false)
     }
@@ -175,8 +194,8 @@ function ProviderCard({ p, isSet, loading, onChanged }) {
         <span style={{ ...s.levelPill, background: lvl.bg, color: lvl.fg, borderColor: lvl.bd }}>
           {lvl.label}
         </span>
-        <span style={isSet ? s.badgeOn : s.badgeOff} title={isSet ? 'A key is saved' : 'No key yet'}>
-          {loading ? '…' : isSet ? '✓ Connected' : '○ Not set'}
+        <span style={isSet ? s.badgeOn : s.badgeOff} title={isSet ? `${count} key${count > 1 ? 's' : ''} saved` : 'No key yet'}>
+          {loading ? '…' : isSet ? `✓ ${count} key${count > 1 ? 's' : ''}` : '○ Not set'}
         </span>
       </div>
 
@@ -191,6 +210,38 @@ function ProviderCard({ p, isSet, loading, onChanged }) {
         <div style={s.setHint}>Active — unlocks {p.unlocks}</div>
       )}
 
+      {/* saved keys — each removable individually */}
+      {isSet && (
+        <div style={s.keyList}>
+          {keys.map((k) => (
+            <div key={k.index} style={s.keyChip}>
+              <span style={s.keyDot}>🔑</span>
+              <span style={s.keyHint}>{k.hint}</span>
+              <button
+                style={s.keyRemove}
+                onClick={() => handleRemoveOne(k.index)}
+                disabled={busy}
+                title="Remove this key"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+          {count > 1 && (
+            <button style={s.removeAll} onClick={handleRemoveAll} disabled={busy}>
+              Remove all
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* rotation hint (LLM providers only) */}
+      {pooled && (
+        <div style={s.rotateHint}>
+          ↻ Add several free keys — Materia rotates to the next one automatically when a key hits its daily limit.
+        </div>
+      )}
+
       {/* get-key + mini steps */}
       <div style={s.getRow}>
         <a href={p.url} target="_blank" rel="noreferrer" style={s.getBtn}
@@ -201,7 +252,7 @@ function ProviderCard({ p, isSet, loading, onChanged }) {
         <span style={s.miniSteps}>{p.steps.join('  →  ')}</span>
       </div>
 
-      {/* input + actions */}
+      {/* input + add */}
       <div style={s.inputRow}>
         <div style={s.inputWrap}>
           <input
@@ -209,8 +260,8 @@ function ProviderCard({ p, isSet, loading, onChanged }) {
             style={s.input}
             value={value}
             onChange={(e) => setValue(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSave()}
-            placeholder={isSet ? 'Paste a new key to replace…' : `Paste your ${p.name} key here…`}
+            onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
+            placeholder={isSet ? `Paste another ${p.name} key…` : `Paste your ${p.name} key here…`}
             autoComplete="off"
             spellCheck={false}
           />
@@ -224,14 +275,9 @@ function ProviderCard({ p, isSet, loading, onChanged }) {
             {show ? '🙈' : '👁'}
           </button>
         </div>
-        <button style={s.saveBtn(!value.trim() || busy)} onClick={handleSave} disabled={!value.trim() || busy}>
-          {busy ? '…' : isSet ? 'Replace' : 'Save'}
+        <button style={s.saveBtn(!value.trim() || busy)} onClick={handleAdd} disabled={!value.trim() || busy}>
+          {busy ? '…' : isSet ? '+ Add key' : 'Save'}
         </button>
-        {isSet && (
-          <button style={s.removeBtn} onClick={handleRemove} disabled={busy} title="Remove this key">
-            Remove
-          </button>
-        )}
       </div>
 
       {saved && <div style={s.okMsg}>✓ Key saved securely.</div>}
@@ -333,10 +379,25 @@ const s = {
     fontSize: '13px', fontWeight: 500, cursor: disabled ? 'not-allowed' : 'pointer',
     whiteSpace: 'nowrap', fontFamily: 'var(--font)', transition: 'all 0.12s',
   }),
-  removeBtn: {
-    padding: '9px 14px', borderRadius: 'var(--radius-sm)', background: 'none',
-    border: '1px solid var(--status-fail-bd)', color: 'var(--danger-fg)', fontSize: '13px', cursor: 'pointer',
-    whiteSpace: 'nowrap', fontFamily: 'var(--font)',
+  // saved-key chips (one per pooled key)
+  keyList: { display: 'flex', flexWrap: 'wrap', gap: '8px', margin: '2px 0 10px', alignItems: 'center' },
+  keyChip: {
+    display: 'inline-flex', alignItems: 'center', gap: '6px',
+    background: 'var(--bg-sidebar)', border: '1px solid var(--border)',
+    borderRadius: '20px', padding: '4px 6px 4px 10px',
+  },
+  keyDot: { fontSize: '11px', lineHeight: 1 },
+  keyHint: { fontSize: '12px', fontFamily: 'ui-monospace, monospace', color: 'var(--text-secondary)', letterSpacing: '0.04em' },
+  keyRemove: {
+    background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)',
+    fontSize: '12px', lineHeight: 1, padding: '2px 4px', borderRadius: '50%',
+  },
+  removeAll: {
+    background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger-fg)',
+    fontSize: '11.5px', padding: '4px 6px', fontFamily: 'var(--font)', textDecoration: 'underline',
+  },
+  rotateHint: {
+    fontSize: '11.5px', color: 'var(--text-muted)', margin: '0 0 10px', lineHeight: 1.5,
   },
   okMsg: { fontSize: '12px', color: 'var(--status-ok-fg)', marginTop: '9px' },
   errMsg: { fontSize: '12px', color: 'var(--danger-fg)', marginTop: '9px' },

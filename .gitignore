@@ -44,6 +44,10 @@ generated/
 /data/
 /pre_trained_models/
 
+# ── Private / pre-publication (keep local; repo goes public after the paper) ──
+docs/paper/
+docs/extract.md
+
 # ── Logs & OS noise ──────────────────────────────────────────────────────────
 *.log
 .DS_Store

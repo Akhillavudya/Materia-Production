@@ -8,6 +8,13 @@ class ApiKeyIn(BaseModel):
     key_value: str
 
 
+class KeyHint(BaseModel):
+    index: int      # position in the user's pool (used to delete one key)
+    hint: str       # masked tail, e.g. "••••ab12" — never the real key
+
+
 class ApiKeyOut(BaseModel):
     service: str
-    exists: bool    # never echo the actual key back to the frontend
+    exists: bool                 # true when the user has ≥1 key for the service
+    count: int = 0               # how many keys are pooled for rotation
+    keys: list[KeyHint] = []     # masked hints, one per stored key

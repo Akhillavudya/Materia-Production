@@ -7,7 +7,7 @@ ATAT — these are fast unit checks that double as the regression test net (Step
 Covered:
   * make_supercell   — atom count & lattice scaling (uniform / per-axis / 3×3 matrix)
   * add_vacuum       — realised inter-image gap matches the request, on every side
-  * make_slab        — EXACTLY the requested number of atomic planes, correct vacuum
+  * make_slab        — EXACTLY the requested number of complete structural repeats, correct vacuum
   * add_adsorbate    — adsorbate placed at the requested height above the surface
   * generate_sqs     — partial-substitution composition matches the target (ATAT-free)
   * convert_structure— POSCAR ↔ CIF ↔ XYZ round-trips preserve the structure
@@ -88,15 +88,35 @@ def test_add_vacuum_side_placement(cu_fcc):
     assert float((bot.cart_coords @ unit).max()) == pytest.approx(c_len, abs=1e-6)
 
 
-# ── make_slab (exact layer counting) ──────────────────────────────────────────
+# ── make_slab (exact structural-layer counting) ───────────────────────────────
+# A "layer" is one complete structural repeat unit (oriented unit cell), NOT a
+# single atomic plane, so N layers is N whole crystal thicknesses stacked along
+# the normal. The invariant is linear: N layers has N× the atoms of one layer and
+# keeps the bulk stoichiometry intact.
 
-@pytest.mark.parametrize("n_layers", [3, 4, 5, 6])
-def test_slab_exact_layer_count(cu_fcc, n_layers):
+def _count_planes(slab, tol=0.3):
+    """Number of distinct atomic planes along the (vertical) c-axis of a slab."""
+    z = np.sort(slab.cart_coords[:, 2])
+    return 1 + int(np.sum(np.diff(z) > tol))
+
+
+@pytest.mark.parametrize("n_layers", [1, 2, 3, 4])
+def test_slab_layers_scale_linearly(cu_fcc, n_layers):
+    one = builder.make_slab(cu_fcc, miller="1 1 1", layers=1, min_vacuum_size=15.0)
     slab = builder.make_slab(cu_fcc, miller="1 1 1", layers=n_layers,
                              min_vacuum_size=15.0)
-    groups = builder._plane_groups(slab)
-    assert len(groups) == n_layers, (
-        f"requested {n_layers} planes, got {len(groups)}")
+    # N complete repeats == N× the atoms of a single repeat, stoichiometry preserved.
+    assert len(slab) == n_layers * len(one)
+    assert slab.composition.reduced_formula == cu_fcc.composition.reduced_formula
+
+
+def test_slab_cu111_layer_is_one_plane(cu_fcc):
+    """For close-packed Cu(111) one repeat is a single atomic plane, so the atomic
+    plane count equals the requested layer count — and the stacking is ABC."""
+    for n in (3, 4, 5, 6):
+        slab = builder.make_slab(cu_fcc, miller="1 1 1", layers=n,
+                                 min_vacuum_size=15.0)
+        assert _count_planes(slab) == n, f"requested {n} layers, got {_count_planes(slab)} planes"
 
 
 def test_slab_vacuum_applied(cu_fcc):
@@ -108,13 +128,12 @@ def test_slab_vacuum_applied(cu_fcc):
 
 
 def test_slab_layers_ignore_min_slab_size(cu_fcc):
-    """With `layers` set, min_slab_size (Å) is ignored — plane count still exact."""
+    """With `layers` set, min_slab_size (Å) is ignored — atom count still exact."""
     a = builder.make_slab(cu_fcc, miller="1 1 1", layers=4, min_slab_size=5.0,
                           min_vacuum_size=15.0)
     b = builder.make_slab(cu_fcc, miller="1 1 1", layers=4, min_slab_size=50.0,
                           min_vacuum_size=15.0)
-    assert len(builder._plane_groups(a)) == 4
-    assert len(builder._plane_groups(b)) == 4
+    assert len(a) == len(b)
 
 
 # ── add_adsorbate ─────────────────────────────────────────────────────────────

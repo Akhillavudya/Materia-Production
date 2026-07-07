@@ -45,7 +45,10 @@ from app.services.storage.file_service import (
     session_dir,
     session_path,
 )
-from app.services.vasp.kpoints import generate_kpoints_by_accuracy
+from app.services.vasp.kpoints import (
+    generate_kpoints_by_accuracy,
+    generate_kpoints_explicit,
+)
 from app.services.vasp.poscar import write_poscar
 from app.services.vasp.service import vasp_service
 
@@ -511,10 +514,29 @@ def generate_poscar(
 # TOOL — generate_kpoints  (KPOINTS by accuracy level)
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _parse_mesh(text: str) -> list[int]:
+    """Read an explicit k-mesh string. Accepts '2 2 2', '2,2,2', '2x2x2', or a
+    single '2' (→ 2 2 2). Raises ValueError on anything else."""
+    import re
+    parts = [p for p in re.split(r"[\s,x×]+", text.strip()) if p]
+    try:
+        nums = [int(p) for p in parts]
+    except ValueError:
+        raise ValueError(
+            f'Could not read k-point mesh "{text}". Use three integers, e.g. "2 2 2".')
+    if len(nums) == 1:
+        nums = nums * 3
+    if len(nums) != 3:
+        raise ValueError(
+            f'A k-point mesh needs one or three integers, got "{text}" — e.g. "2 2 2".')
+    return nums
+
+
 def generate_kpoints(
     accuracy_level: str = "Medium",
     gamma_centered: bool = True,
     custom_kppa:    Optional[int] = None,
+    explicit_mesh:  Optional[str] = None,
     material_id:    Optional[str] = None,
     source:         Optional[str] = None,
     poscar_path:    Optional[str] = None,
@@ -522,12 +544,35 @@ def generate_kpoints(
     """Write a VASP KPOINTS file at a chosen accuracy level (fast).
 
     `accuracy_level` sets the k-points-per-atom density: "Low" (1000), "Medium"
-    (3000), "High" (5000), or "Custom" (uses `custom_kppa`). `gamma_centered=True`
-    writes a Γ-centered mesh (recommended); False writes Monkhorst-Pack. Saves
-    ``KPOINTS`` into the session root next to the active POSCAR. Operates on the
-    active session structure by default; pass `poscar_path` for a specific session
-    file or `material_id` (+ `source`) to fetch one from a database.
+    (3000), "High" (5000), or "Custom" (uses `custom_kppa`). `explicit_mesh`
+    (e.g. "2 2 2" or "1 1 1") overrides the density and writes that EXACT mesh —
+    handy when the user asks for a specific grid; a mesh cannot go below 1 1 1.
+    `gamma_centered=True` writes a Γ-centered mesh (recommended); False writes
+    Monkhorst-Pack. Saves ``KPOINTS`` into the session root next to the active
+    POSCAR. Operates on the active session structure by default; pass
+    `poscar_path` for a specific session file or `material_id` (+ `source`) to
+    fetch one from a database.
     """
+    # Explicit mesh short-circuit — independent of the structure/density.
+    if explicit_mesh and explicit_mesh.strip():
+        try:
+            text, used = generate_kpoints_explicit(
+                _parse_mesh(explicit_mesh), gamma_centered=gamma_centered)
+        except ValueError as e:
+            return {"status": "error", "message": str(e)}
+        out = session_dir() / "KPOINTS"
+        out.write_text(text if text.endswith("\n") else text + "\n")
+        style = "Γ-centered" if gamma_centered else "Monkhorst-Pack"
+        grid = "×".join(map(str, used))
+        return {
+            "status":         "success",
+            "accuracy_level": "Explicit",
+            "mesh":           used,
+            "gamma_centered": gamma_centered,
+            "files_written":  ["KPOINTS"],
+            "message":        f"KPOINTS written with an explicit {grid} mesh ({style}).",
+        }
+
     try:
         structure = _resolve_structure(material_id, source, poscar_path)
     except _StructureError as e:
@@ -753,8 +798,9 @@ def make_slab(
 ) -> dict:
     """Cut a surface slab along a Miller index and save it as the active POSCAR.
 
-    Cuts along `miller` (e.g. "1 1 1"). Set `layers` for an EXACT atomic-layer count
-    (what users mean by "N layers"); otherwise the slab is sized to `min_slab_size`
+    Cuts along `miller` (e.g. "1 1 1"). Set `layers` for an EXACT count of complete
+    structural repeat units — one full crystal thickness per layer, so stoichiometry
+    stays intact (what users mean by "N layers"); otherwise the slab is sized to `min_slab_size`
     Å thick. Vacuum (`min_vacuum_size` Å) is INCLUDED — do NOT also call add_vacuum.
     `shift` selects which surface termination; `lll_reduce` reduces the slab cell.
     Operates on the active session structure by default; pass `poscar_path` for a
@@ -784,37 +830,90 @@ def make_slab(
     return _finish_build(result, "make_slab", n_before, tag=tag, detail=detail)
 
 
+def _ensure_slab(structure, material_type, *, miller, layers, min_vacuum_size):
+    """Return ``(slab, built)`` — build a slab from a bulk crystal when needed.
+
+    ``material_type``: "slab" adsorbs the input as-is; "bulk" always cuts a slab
+    first; "auto" (default) cuts one only when the input has no vacuum gap (i.e. it
+    is a space-filling bulk crystal). Slab-cut parameters (``miller`` / ``layers`` /
+    ``min_vacuum_size``) are only used when a slab actually has to be built.
+    """
+    mt = (material_type or "auto").lower().strip()
+    if mt not in ("auto", "bulk", "slab"):
+        raise _StructureError('material_type must be "auto", "bulk" or "slab".')
+    need = mt == "bulk" or (mt == "auto" and not builder.has_vacuum_gap(structure))
+    if not need:
+        return structure, False
+    try:
+        slab = builder.make_slab(structure, miller=miller, layers=layers,
+                                 min_vacuum_size=min_vacuum_size)
+    except Exception as e:  # noqa: BLE001
+        raise _StructureError(f"could not build a slab from the bulk input: {e}")
+    return slab, True
+
+
 def add_adsorbate(
     molecule:         str,
     site_type:        str   = "ontop",
     distance:         float = 2.0,
+    atom_index:       Optional[int] = None,
     relax:            bool  = False,
     calculator_type:  Optional[str] = None,
     calculator_model: Optional[str] = None,
+    material_type:    str   = "auto",
+    miller:           str   = "1 1 1",
+    layers:           int   = 4,
+    min_vacuum_size:  float = 15.0,
     material_id:      Optional[str] = None,
     source:           Optional[str] = None,
     poscar_path:      Optional[str] = None,
 ) -> dict:
-    """Adsorb a molecule (e.g. CO2) onto the active surface slab.
+    """Adsorb a molecule (e.g. CO2) onto a surface slab.
+
+    `material_type` controls the input: "slab" adsorbs the structure as-is, "bulk"
+    cuts a slab first (along `miller`, `layers` thick, `min_vacuum_size` Å vacuum),
+    and "auto" (default) detects which — building a slab only when the input is a
+    space-filling bulk crystal, so the user can hand over either a bulk or a slab.
 
     Default (relax=False): place the molecule geometrically on an auto-picked site
     (first symmetry-reduced `site_type`, "ontop" by default) at `distance` Å above the
-    surface, save it as the active POSCAR, and return immediately.
+    surface, save it as the active POSCAR, and return immediately. Pass `atom_index`
+    (0-based) to place it directly above a specific slab atom instead of a site_type.
 
     relax=True: run an accurate AdsorbML-style background job — enumerate placements,
     relax each with an ML potential (MACE/MatterSim), discard desorbed/dissociated
     configs, and return the lowest adsorption-energy structure. Returns a job_id.
 
-    Operates on the active session structure (which should be a slab — use make_slab
-    first); pass `poscar_path` / `material_id` (+ `source`) for another source.
+    Operates on the active session structure; pass `poscar_path` / `material_id`
+    (+ `source`) for another source.
     """
     from app.services.structure import adsorption
 
     if relax:
+        if atom_index is not None:
+            return {"status": "error", "message": (
+                "atom_index placement is only available in fast geometric mode "
+                "(relax=False); accurate relax mode enumerates and ranks sites itself.")}
         try:
             slab_path = find_structure_in_session(poscar_path)
         except FileNotFoundError as e:
             return {"status": "error", "message": str(e)}
+        # Cut a slab from a bulk input first (if needed), then relax on that slab.
+        try:
+            slab, built = _ensure_slab(_parse_structure(slab_path), material_type,
+                                       miller=miller, layers=layers,
+                                       min_vacuum_size=min_vacuum_size)
+        except _StructureError as e:
+            return {"status": "error", "message": str(e)}
+        if built:
+            if len(slab) > settings.max_atoms:
+                return {"status": "error", "message": (
+                    f"The built slab has {len(slab)} atoms, above the "
+                    f"{settings.max_atoms}-atom limit on this server. "
+                    "Use fewer layers or a smaller Miller index.")}
+            wp = write_poscar(slab, session_dir(),
+                              name=slab.composition.reduced_formula, tag="slab")
+            slab_path = Path(wp["poscar_path"])
         calc_cfg = _resolve_calculator(calculator_type, calculator_model)
         if calc_cfg.get("status") == "error":
             return calc_cfg
@@ -836,18 +935,23 @@ def add_adsorbate(
 
     try:
         structure = _resolve_build_input(material_id, source, poscar_path)
+        structure, built_slab = _ensure_slab(structure, material_type, miller=miller,
+                                             layers=layers, min_vacuum_size=min_vacuum_size)
     except _StructureError as e:
         return {"status": "error", "message": str(e)}
 
     n_before = len(structure)
     try:
         result = adsorption.place_adsorbate(structure, molecule=molecule,
-                                            site_type=site_type, distance=distance)
+                                            site_type=site_type, distance=distance,
+                                            atom_index=atom_index)
     except Exception as e:  # noqa: BLE001
         return {"status": "error", "message": f"add_adsorbate failed: {e}"}
 
     tag = f"ads-{str(molecule).strip().lower()}"
-    detail = (f"{molecule} on {site_type} site (+{len(result) - n_before} atoms); "
+    where = f"atom #{atom_index}" if atom_index is not None else f"{site_type} site"
+    prefix = f"built {miller} slab, then " if built_slab else ""
+    detail = (f"{prefix}{molecule} on {where} (+{len(result) - n_before} atoms); "
               f"now {len(result)} atoms")
     return _finish_build(result, "add_adsorbate", n_before, tag=tag, detail=detail)
 
@@ -938,8 +1042,8 @@ def _finish_defect(sc, defect_name: str, kind: str, n_bulk: int,
     """Atom-cap, write the defective supercell as the active POSCAR, return the envelope."""
     if len(sc) > settings.max_atoms:
         return {"status": "error",
-                "message": (f"The {kind} supercell has {len(sc)} atoms, above the "
-                            f"{settings.max_atoms}-atom limit. Use a smaller supercell.")}
+                "message": (f"The {kind} structure has {len(sc)} atoms, above the "
+                            f"{settings.max_atoms}-atom limit. Use a smaller cell.")}
     formula = sc.composition.reduced_formula
     try:
         wp = write_poscar(sc, session_dir(), name=formula, tag=tag)
@@ -953,7 +1057,7 @@ def _finish_defect(sc, defect_name: str, kind: str, n_bulk: int,
         "n_sites":       len(sc),
         "files_written": wp["files_written"],
         "message": (
-            f"Created {kind} ({defect_name}); supercell now has {len(sc)} atoms. "
+            f"Created {kind} ({defect_name}); structure now has {len(sc)} atoms. "
             f"Wrote {wp['files_written'][-1]} (active as POSCAR) for the next step. "
             "To make it a CHARGED defect, run generate_vasp_inputs with a `charge` "
             "value (it sets NELECT)."
@@ -963,22 +1067,23 @@ def _finish_defect(sc, defect_name: str, kind: str, n_bulk: int,
 
 def create_vacancy(
     element:     Optional[str] = None,
-    supercell:   Optional[str] = None,
+    count:       Optional[str] = None,
     poscar_path: Optional[str] = None,
     material_id: Optional[str] = None,
     source:      Optional[str] = None,
 ) -> dict:
-    """Create a vacancy (remove one atom) in a supercell and save it as the active POSCAR.
+    """Remove one or more atoms to make vacancies, saved as the active POSCAR.
 
     `element` selects which species to remove (defaults to the first site found).
-    `supercell` like "2 2 2" sizes the cell; omit it to auto-size for defect isolation.
+    `count` is how many to remove — a number (e.g. "3") or "all"; defaults to 1.
+    Operates on the current cell; call make_supercell first for a dilute defect.
     """
     try:
         structure = _resolve_build_input(material_id, source, poscar_path)
     except _StructureError as e:
         return {"status": "error", "message": str(e)}
     try:
-        sc, name = builder.create_vacancy(structure, element=element, supercell=supercell)
+        sc, name = builder.create_vacancy(structure, element=element, count=count)
     except Exception as e:  # noqa: BLE001
         return {"status": "error", "message": f"Vacancy creation failed: {e}"}
     tag = f"vac-{element}" if element else "vac"
@@ -988,19 +1093,23 @@ def create_vacancy(
 def create_substitution(
     from_element: str,
     to_element:   str,
-    supercell:    Optional[str] = None,
+    count:        Optional[str] = None,
     poscar_path:  Optional[str] = None,
     material_id:  Optional[str] = None,
     source:       Optional[str] = None,
 ) -> dict:
-    """Substitute one `from_element` atom with `to_element` in a supercell; save active POSCAR."""
+    """Replace one or more `from_element` atoms with `to_element`; save active POSCAR.
+
+    `count` is how many to replace — a number (e.g. "3") or "all"; defaults to 1.
+    Operates on the current cell.
+    """
     try:
         structure = _resolve_build_input(material_id, source, poscar_path)
     except _StructureError as e:
         return {"status": "error", "message": str(e)}
     try:
         sc, name = builder.create_substitution(
-            structure, from_element=from_element, to_element=to_element, supercell=supercell)
+            structure, from_element=from_element, to_element=to_element, count=count)
     except Exception as e:  # noqa: BLE001
         return {"status": "error", "message": f"Substitution failed: {e}"}
     return _finish_defect(sc, name, "substitution", len(structure),
@@ -1009,19 +1118,23 @@ def create_substitution(
 
 def create_interstitial(
     insert_element: str,
-    supercell:      Optional[str] = None,
+    count:          Optional[str] = None,
     poscar_path:    Optional[str] = None,
     material_id:    Optional[str] = None,
     source:         Optional[str] = None,
 ) -> dict:
-    """Insert `insert_element` at a Voronoi interstitial site in a supercell; save active POSCAR."""
+    """Insert one or more atoms at Voronoi interstitial sites; save active POSCAR.
+
+    `count` is how many to insert — a number (e.g. "3") or "all"; defaults to 1.
+    Operates on the current cell; call make_supercell first for a dilute defect.
+    """
     try:
         structure = _resolve_build_input(material_id, source, poscar_path)
     except _StructureError as e:
         return {"status": "error", "message": str(e)}
     try:
         sc, name = builder.create_interstitial(
-            structure, insert_element=insert_element, supercell=supercell)
+            structure, insert_element=insert_element, count=count)
     except Exception as e:  # noqa: BLE001
         return {"status": "error", "message": f"Interstitial creation failed: {e}"}
     return _finish_defect(sc, name, "interstitial", len(structure),
@@ -1606,8 +1719,65 @@ def _parse_substitutions(text: Optional[str]) -> Optional[list]:
     return out or None
 
 
+def _parse_sublattice_comp(text: Optional[str]) -> Optional[dict]:
+    """Parse a per-sublattice composition into ``{sublattice: {El: frac}}``.
+
+    Accepts entries like ``"Ti=Ti0.6,Zr0.4; Sr=Sr0.6,Ba0.4"`` (semicolon between
+    sublattices, ``=`` or ``:`` between the sublattice key and its occupancy,
+    comma/space between element tokens). Each element token is ``El<number>``,
+    e.g. ``Zr0.4``. None/blank → None. Raises ValueError on a malformed entry.
+    """
+    if not text:
+        return None
+    out: dict = {}
+    for entry in str(text).split(";"):
+        entry = entry.strip()
+        if not entry:
+            continue
+        m = re.match(r"^\s*([A-Za-z][A-Za-z0-9()]*?)\s*[=:]\s*(.+)$", entry)
+        if not m:
+            raise ValueError(
+                f"Invalid sublattice composition '{entry}'. Use "
+                "'Sublattice=El1frac1,El2frac2', e.g. 'Ti=Ti0.6,Zr0.4'.")
+        key, rest = m.group(1), m.group(2)
+        occ: dict = {}
+        for tok in re.split(r"[,\s]+", rest.strip()):
+            if not tok:
+                continue
+            tm = re.match(r"^([A-Za-z]+)\s*([0-9]*\.?[0-9]+)$", tok)
+            if not tm:
+                raise ValueError(
+                    f"Invalid occupancy token '{tok}' for sublattice '{key}'. "
+                    "Use 'El<fraction>', e.g. 'Zr0.4'.")
+            occ[tm.group(1)] = float(tm.group(2))
+        if not occ:
+            raise ValueError(f"No occupancies given for sublattice '{key}'.")
+        out[key] = occ
+    return out or None
+
+
+def list_sublattices(
+    cif_name: Optional[str] = None,
+    symprec:  float         = 0.1,
+) -> dict:
+    """List the symmetry-distinct sublattices (Wyckoff sites) of a structure.
+
+    Use this BEFORE generate_sqs to see which sites you can turn into a random
+    alloy. For SrTiO₃ it reports an Sr site, a Ti site and an O site; the user
+    then picks one and gives a composition (e.g. "Ti=Ti0.6,Zr0.4"). Reads the
+    active structure if ``cif_name`` is omitted. Fast — returns immediately.
+    """
+    try:
+        cif_path = find_structure_in_session(cif_name, prefer_contcar=True)
+    except FileNotFoundError as e:
+        return {"status": "error", "message": str(e)}
+    from app.services.simulation.sqs import list_sublattices as _list
+    return _list(str(cif_path), symprec=float(symprec))
+
+
 def generate_sqs(
     cif_name:         Optional[str] = None,
+    sublattice_comp:  Optional[str] = None,
     target_comp:      Optional[str] = None,
     substitute:       Optional[str] = None,
     supercell:        str           = "2 2 2",
@@ -1615,17 +1785,22 @@ def generate_sqs(
     n_parallel:       int           = 4,
     target_objective: float         = -0.99,
     time_budget_s:    int           = 600,
+    relax:            bool          = True,
+    calculator_type:  str           = "mace",
+    calculator_model: Optional[str] = None,
 ) -> dict:
     """Queue a Special Quasi-random Structure (SQS) job via ATAT mcsqs.
 
-    SQS needs partial site occupancies. There are two ways to supply them:
-      • give a disordered structure (a CIF with partial occupancies), or
-      • pass ``substitute`` (e.g. "Si->S:0.25") to turn an *ordered* structure into a
-        disordered one — "substitute 25% of Si with S" — built from the active
-        POSCAR / material. This is the path for requests like "substitute 25% of Si
-        with S in MgSi2Se4 using SQS".
+    Works from a **normal ordered structure** (the active POSCAR/material) — no
+    disordered CIF required. Define the random alloy with ``sublattice_comp``:
+    a per-sublattice target composition like ``"Ti=Ti0.6,Zr0.4"`` (put 60% Ti /
+    40% Zr on the Ti sublattice) or ``"Ti=Ti0.6,Zr0.4; Sr=Sr0.6,Ba0.4"`` for two
+    sublattices at once. Call ``list_sublattices`` first to see the site names.
 
-    Finds the best quasi-random ordering in a supercell and writes it as a POSCAR.
+    Legacy alternatives still work: ``substitute`` ("Si->S:0.25") or an
+    already-disordered CIF. After the search, the SQS supercell is relaxed with an
+    ML potential (``relax``/``calculator_type``, MACE by default).
+
     Long-running, so this enqueues a job and returns a ``job_id`` immediately.
     """
     try:
@@ -1635,10 +1810,7 @@ def generate_sqs(
 
     try:
         comp = _parse_target_comp(target_comp)
-    except ValueError as e:
-        return {"status": "error", "message": str(e)}
-
-    try:
+        sub_comp = _parse_sublattice_comp(sublattice_comp)
         subs = _parse_substitutions(substitute)
     except ValueError as e:
         return {"status": "error", "message": str(e)}
@@ -1646,23 +1818,25 @@ def generate_sqs(
     n_parallel = min(max(int(n_parallel), 1), 16)
     time_budget_s = max(int(time_budget_s), 30)
 
+    calc_cfg = _resolve_calculator(calculator_type, calculator_model) if relax else {}
+    if calc_cfg.get("status") == "error":
+        return calc_cfg
+
     try:
         if cif_name:
-            cif_path = find_structure_in_session(cif_name, prefer_contcar=False)
-        elif subs:
-            # With a substitution spec we START from an ordered structure (the active
-            # POSCAR / material) and inject partial occupancies inside the job.
-            cif_path = find_structure_in_session(None, prefer_contcar=True)
-        else:
-            # SQS needs a DISORDERED structure; POSCARs are always ordered, so prefer
-            # a .cif (a *_disordered.cif from activation first) over the default resolver.
+            cif_path = find_structure_in_session(cif_name, prefer_contcar=True)
+        elif not (sub_comp or subs):
+            # No composition given: an activated disordered CIF (partial occupancies)
+            # is the only thing that can seed an SQS, so prefer it over the POSCAR.
             base = session_path()
             cifs = sorted([p for p in base.rglob("*.cif") if p.is_file()],
                           key=lambda p: p.stat().st_mtime, reverse=True)
             disordered = [p for p in cifs if p.name.endswith("_disordered.cif")]
-            chosen = disordered or cifs
-            cif_path = chosen[0] if chosen else find_structure_in_session(
-                None, prefer_contcar=False)
+            cif_path = (disordered or cifs or [None])[0] or find_structure_in_session(
+                None, prefer_contcar=True)
+        else:
+            # Composition given → start from the active ordered structure.
+            cif_path = find_structure_in_session(None, prefer_contcar=True)
     except FileNotFoundError as e:
         return {"status": "error", "message": str(e)}
 
@@ -1672,14 +1846,16 @@ def generate_sqs(
         output_dir=session_path() / "sqs",
         params={
             "target_comp": comp,
+            "sublattice_comp": sub_comp,
             "substitutions": subs,
             "supercell": list(sc),
             "cutoff": cutoff,
             "n_parallel": n_parallel,
             "target_objective": float(target_objective),
             "time_budget_s": time_budget_s,
+            "relax": bool(relax),
         },
-        calculator={},
+        calculator=calc_cfg if relax else {},
         emit_vasp_inputs=False,
     )
     return result
@@ -1690,18 +1866,21 @@ def generate_sqs(
 # ─────────────────────────────────────────────────────────────────────────────
 
 def list_migration_paths(
-    element:      str,
-    cutoff:       float         = 5.0,
-    poscar_name:  Optional[str] = None,
-    material_id:  Optional[str] = None,
-    source:       Optional[str] = None,
-    symprec:      float         = 0.1,
+    element:          str,
+    cutoff:           float         = 5.0,
+    poscar_name:      Optional[str] = None,
+    material_id:      Optional[str] = None,
+    source:           Optional[str] = None,
+    symprec:          float         = 0.1,
 ) -> dict:
     """List candidate NEB migration hops for a migrating element (no job).
 
     Finds the symmetry-distinct sites of ``element`` (labelled 1..N) and returns
     every source→destination pair within ``cutoff`` Å, sorted shortest-first — so
     the user can pick a hop (e.g. "1-5") before launching a long NEB.
+
+    Analyses the structure exactly as supplied (no auto-supercell). If the cell is
+    small, run ``make_supercell`` first to give the migrating ion enough hop space.
     """
     from app.services.simulation import neb_path
 
@@ -1737,7 +1916,7 @@ def list_migration_paths(
                    "orbit": s.orbit} for s in sites],
         "pairs": neb_path.pairs_to_rows(pairs),
         "message": (
-            f"{element}: {len(sites)} symmetry-distinct site(s); "
+            f"{element}: {len(sites)} site(s); "
             f"{len(pairs)} candidate hop(s) within {cutoff} Å. "
             f"Pick a pair (e.g. source_site/dest_site) for compute_neb."),
     }
@@ -1748,6 +1927,11 @@ def _build_neb_endpoints(initial_path, element, source_site, dest_site, symprec)
 
     Returns ``(initial_path, final_path, info)`` or raises ValueError. The chosen
     hop defaults to the shortest candidate pair when source/dest are not given.
+
+    The endpoints are built from the cell exactly as supplied (no auto-supercell) —
+    prepare a large enough cell with ``make_supercell`` first if the ion needs more
+    hop space. The MLP relaxation of the endpoints happens later inside the NEB job
+    (neb.py).
     """
     from app.services.simulation import neb_path
 
@@ -1777,13 +1961,16 @@ def compute_neb(
     migrating_element: Optional[str] = None,
     source_site:       Optional[int] = None,
     dest_site:         Optional[int] = None,
-    n_images:          int           = 7,
+    n_images:          int           = 8,
     fmax:              float         = 0.05,
+    endpoint_fmax:     float         = 0.03,
     max_steps:         int           = 300,
     spring_k:          float         = 1.0,
     climb:             bool          = True,
     relax_endpoints:   bool          = True,
     optimizer:         str           = "FIRE",
+    run_frequencies:   bool          = True,
+    emit_vasp_inputs:  bool          = True,
     symprec:           float         = 0.1,
     calculator_type:   str           = "mace",
     calculator_model:  Optional[str] = None,
@@ -1807,10 +1994,11 @@ def compute_neb(
         return {"status": "error",
                 "message": "compute_neb needs either final_poscar_name (an end-state "
                            "structure) OR migrating_element (e.g. 'Mg') to auto-build "
-                           "the hop. Use list_migration_paths to see candidate hops."}
+                           "the hop."}
 
     n_images = min(max(int(n_images), 3), 15)
     fmax = max(float(fmax), 0.001)
+    endpoint_fmax = max(float(endpoint_fmax), 0.001)
     max_steps = min(max(int(max_steps), 1), settings.max_opt_steps)
     spring_k = max(float(spring_k), 0.01)
 
@@ -1871,14 +2059,18 @@ def compute_neb(
             "final_poscar_path": str(final_path),
             "n_images": n_images,
             "fmax": fmax,
+            "endpoint_fmax": endpoint_fmax,
             "max_steps": max_steps,
             "spring_k": spring_k,
             "climb": bool(climb),
             "relax_endpoints": bool(relax_endpoints),
             "optimizer": str(optimizer),
+            "run_frequencies": bool(run_frequencies),
+            "migrating_element": (migrating_element.strip()
+                                  if migrating_element else None),
         },
         calculator=calc_cfg,
-        emit_vasp_inputs=False,
+        emit_vasp_inputs=bool(emit_vasp_inputs),
     )
     if result.get("status") == "queued":
         result["calculator"] = calc_cfg

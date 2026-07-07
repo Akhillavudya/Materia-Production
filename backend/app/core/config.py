@@ -157,6 +157,10 @@ class Settings(BaseModel):
     # Gemini (Google AI Studio free tier — native function calling)
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-2.5-flash"
+    # Optional extra free keys for quota headroom: GEMINI_API_KEYS / GROQ_API_KEYS
+    # (comma-separated). Read directly from the environment by the providers via
+    # agent/providers/_keypool.py, which rotates to the next key on a 429 before
+    # the request falls through to the next provider.
     # Ollama (local fallback; qwen3 supports native tools)
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "qwen3:14b"

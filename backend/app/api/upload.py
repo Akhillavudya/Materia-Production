@@ -355,6 +355,31 @@ async def launch_elastic(
     return result
 
 
+@router.post("/sessions/{session_id}/sqs/sublattices")
+@limiter.limit("30/minute")
+async def detect_sublattices(
+    request: Request,
+    session_id: str,
+    structure: UploadFile = File(None),
+    symprec: float = Form(0.1),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List the symmetry-distinct sublattices of the active/uploaded structure.
+
+    Powers the SQS panel's "Detect sublattices" button: the user sees which sites
+    (Sr, Ti, O…) they can turn into a random alloy before launching the search.
+    Synchronous and fast — no job is enqueued.
+    """
+    await get_session_for_user(session_id, current_user, db)
+    name = await _store_optional(session_id, structure)
+    from app.tools import material_tools
+    return await _run_tool_launch(session_id, current_user.id, lambda: material_tools.list_sublattices(
+        cif_name=name,
+        symprec=float(symprec),
+    ))
+
+
 @router.post("/sessions/{session_id}/sqs")
 @limiter.limit("10/minute")
 async def launch_sqs(
@@ -362,9 +387,13 @@ async def launch_sqs(
     session_id: str,
     structure: UploadFile = File(None),
     supercell: str = Form("2 2 2"),
+    sublattice_comp: str | None = Form(None),
     target_comp: str | None = Form(None),
     n_parallel: int = Form(4),
     time_budget_s: int = Form(600),
+    relax: bool = Form(True),
+    calculator_type: str = Form("mace"),
+    calculator_model: str | None = Form(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -375,14 +404,48 @@ async def launch_sqs(
     from app.tools import material_tools
     result = await _run_tool_launch(session_id, current_user.id, lambda: material_tools.generate_sqs(
         cif_name=name,
+        sublattice_comp=(sublattice_comp or None),
         target_comp=(target_comp or None),
         supercell=supercell,
         n_parallel=int(n_parallel),
         time_budget_s=int(time_budget_s),
+        relax=bool(relax),
+        calculator_type=calculator_type,
+        calculator_model=(calculator_model or None),
     ))
     await _log_manual_run(db, session_id, tool="generate_sqs",
                           label="SQS (random alloy)", result=result, t_before=t_before)
     return result
+
+
+@router.post("/sessions/{session_id}/migration-paths")
+@limiter.limit("30/minute")
+async def list_migration_paths(
+    request: Request,
+    session_id: str,
+    element: str = Form(...),
+    cutoff: float = Form(5.0),
+    structure: UploadFile = File(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List candidate migration hops for ``element`` (NEB pre-flight, no job).
+
+    Powers the NEB card's "List hops" button: the user picks the migrating element
+    and gets the ranked source→dest site pairs to choose from before launching a
+    (long) NEB. Analyses the structure exactly as supplied (no auto-supercell) —
+    prepare a larger cell with make_supercell first if the ion needs more hop space.
+    Synchronous and fast.
+    """
+    await get_session_for_user(session_id, current_user, db)
+    name = await _store_optional(session_id, structure)
+    from app.tools import material_tools
+    return await _run_tool_launch(session_id, current_user.id,
+        lambda: material_tools.list_migration_paths(
+            element=element,
+            cutoff=float(cutoff),
+            poscar_name=name,
+        ))
 
 
 @router.post("/sessions/{session_id}/neb")
@@ -390,28 +453,54 @@ async def launch_sqs(
 async def launch_neb(
     request: Request,
     session_id: str,
-    initial: UploadFile = File(...),
-    final: UploadFile = File(...),
-    n_images: int = Form(7),
+    initial: UploadFile = File(None),
+    final: UploadFile = File(None),
+    structure: UploadFile = File(None),
+    migrating_element: str | None = Form(None),
+    source_site: int | None = Form(None),
+    dest_site: int | None = Form(None),
+    endpoint_fmax: float = Form(0.03),
+    n_images: int = Form(8),
     calculator_type: str = Form("mace"),
     calculator_model: str | None = Form(None),
     climb: bool = Form(True),
+    run_frequencies: bool = Form(True),
+    emit_vasp_inputs: bool = Form(True),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Launch an NEB job from two uploaded endpoint structures (UI workflow panel).
+    """Launch an NEB job from the UI workflow panel — two ways to pick the hop.
 
-    Stores both files in the session, then calls the same ``compute_neb`` tool the
-    agent uses — bypassing chat/file-resolution so the user explicitly picks the
-    initial and final states. Returns the queued-job envelope (job_id) for the
-    dashboard to track.
+    • **Migrating element** (``migrating_element`` + optional ``source_site`` /
+      ``dest_site`` from ``/migration-paths``): the tool builds the vacancy-mediated
+      endpoints from the cell as supplied (run make_supercell first for hop space).
+    • **Two endpoint files** (``initial`` + ``final``): the user supplies their own
+      (already optimised) end states.
+
+    Either way it calls the same ``compute_neb`` tool the agent uses.
     """
     await get_session_for_user(session_id, current_user, db)
 
-    initial_name = await _store_endpoint(session_id, "initial", initial)
-    final_name = await _store_endpoint(session_id, "final", final)
-
     from app.tools import material_tools
+
+    if migrating_element and migrating_element.strip():
+        # Hop mode: analyse/build from a (possibly uploaded) base structure.
+        base_name = await _store_optional(session_id, structure)
+        kwargs = dict(
+            poscar_name=base_name,
+            migrating_element=migrating_element.strip(),
+            source_site=source_site,
+            dest_site=dest_site,
+        )
+    else:
+        # Two-file mode: explicit initial + final end states.
+        if initial is None or final is None or not (initial.filename or "").strip() \
+                or not (final.filename or "").strip():
+            raise HTTPException(status_code=400,
+                detail="Provide a migrating_element, or both initial and final files.")
+        initial_name = await _store_endpoint(session_id, "initial", initial)
+        final_name = await _store_endpoint(session_id, "final", final)
+        kwargs = dict(poscar_name=initial_name, final_poscar_name=final_name)
 
     def _run():
         # Async→thread ContextVars don't propagate; set identity explicitly
@@ -419,12 +508,14 @@ async def launch_neb(
         set_session_dir(str(get_session_dir(session_id)))
         set_request_identity(current_user.id, session_id)
         return material_tools.compute_neb(
-            poscar_name=initial_name,
-            final_poscar_name=final_name,
             n_images=int(n_images),
+            endpoint_fmax=float(endpoint_fmax),
             calculator_type=calculator_type,
             calculator_model=calculator_model or None,
             climb=bool(climb),
+            run_frequencies=bool(run_frequencies),
+            emit_vasp_inputs=bool(emit_vasp_inputs),
+            **kwargs,
         )
 
     t_before = time.time()
@@ -576,6 +667,7 @@ async def launch_add_adsorbate(
     structure: UploadFile = File(None),
     molecule: str = Form(...),
     site_type: str = Form("ontop"),
+    atom_index: str | None = Form(None),
     distance: float = Form(2.0),
     relax: bool = Form(False),
     calculator_type: str = Form("mace"),
@@ -587,14 +679,24 @@ async def launch_add_adsorbate(
 
     ``relax=False`` (default) places the molecule geometrically and returns at
     once; ``relax=True`` enqueues an AdsorbML-style background job (job_id).
+    ``atom_index`` (0-based) targets a specific slab atom instead of a site_type.
     """
     await get_session_for_user(session_id, current_user, db)
     name = await _store_optional(session_id, structure)
     t_before = time.time()
+    if atom_index in (None, ""):
+        ai = None
+    else:
+        try:
+            ai = int(atom_index)
+        except ValueError:
+            return {"status": "error",
+                    "message": f"atom_index must be a whole number, got {atom_index!r}."}
     from app.tools import material_tools
     result = await _run_tool_launch(session_id, current_user.id, lambda: material_tools.add_adsorbate(
         molecule=molecule,
         site_type=site_type,
+        atom_index=ai,
         distance=float(distance),
         relax=bool(relax),
         calculator_type=calculator_type,
@@ -739,6 +841,7 @@ async def launch_generate_kpoints(
     accuracy_level: str = Form("Medium"),
     gamma_centered: bool = Form(True),
     custom_kppa: int | None = Form(None),
+    explicit_mesh: str | None = Form(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -749,13 +852,17 @@ async def launch_generate_kpoints(
     from app.tools import material_tools
 
     def _go():
-        resolved = _active_structure_name(name)
-        if isinstance(resolved, dict):
-            return resolved
+        # An explicit mesh needs no structure; only resolve one otherwise.
+        resolved = None
+        if not (explicit_mesh and explicit_mesh.strip()):
+            resolved = _active_structure_name(name)
+            if isinstance(resolved, dict):
+                return resolved
         return material_tools.generate_kpoints(
             accuracy_level=accuracy_level,
             gamma_centered=bool(gamma_centered),
             custom_kppa=(int(custom_kppa) if custom_kppa is not None else None),
+            explicit_mesh=(explicit_mesh or None),
             poscar_path=resolved,
         )
 
@@ -772,18 +879,18 @@ async def launch_create_vacancy(
     session_id: str,
     structure: UploadFile = File(None),
     element: str | None = Form(None),
-    supercell: str | None = Form(None),
+    count: str | None = Form(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a vacancy defect in a supercell of the active structure (UI panel)."""
+    """Create one or more vacancies in the active structure (UI panel)."""
     await get_session_for_user(session_id, current_user, db)
     name = await _store_optional(session_id, structure)
     t_before = time.time()
     from app.tools import material_tools
     result = await _run_tool_launch(session_id, current_user.id, lambda: material_tools.create_vacancy(
         element=(element or None),
-        supercell=(supercell or None),
+        count=(count or None),
         poscar_path=name,
     ))
     await _log_manual_run(db, session_id, tool="create_vacancy",
@@ -799,11 +906,11 @@ async def launch_create_substitution(
     structure: UploadFile = File(None),
     from_element: str = Form(...),
     to_element: str = Form(...),
-    supercell: str | None = Form(None),
+    count: str | None = Form(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Substitute one element for another in a supercell of the active structure (UI panel)."""
+    """Substitute one or more atoms of one element for another (UI panel)."""
     await get_session_for_user(session_id, current_user, db)
     name = await _store_optional(session_id, structure)
     t_before = time.time()
@@ -811,7 +918,7 @@ async def launch_create_substitution(
     result = await _run_tool_launch(session_id, current_user.id, lambda: material_tools.create_substitution(
         from_element=from_element,
         to_element=to_element,
-        supercell=(supercell or None),
+        count=(count or None),
         poscar_path=name,
     ))
     await _log_manual_run(db, session_id, tool="create_substitution",
@@ -826,18 +933,18 @@ async def launch_create_interstitial(
     session_id: str,
     structure: UploadFile = File(None),
     insert_element: str = Form(...),
-    supercell: str | None = Form(None),
+    count: str | None = Form(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Insert an interstitial atom in a supercell of the active structure (UI panel)."""
+    """Insert one or more interstitial atoms in the active structure (UI panel)."""
     await get_session_for_user(session_id, current_user, db)
     name = await _store_optional(session_id, structure)
     t_before = time.time()
     from app.tools import material_tools
     result = await _run_tool_launch(session_id, current_user.id, lambda: material_tools.create_interstitial(
         insert_element=insert_element,
-        supercell=(supercell or None),
+        count=(count or None),
         poscar_path=name,
     ))
     await _log_manual_run(db, session_id, tool="create_interstitial",

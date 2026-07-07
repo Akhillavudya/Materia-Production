@@ -60,7 +60,13 @@ class MPProvider:
 
         # Return the FULL stability-sorted set (capped) — the tool slices the
         # top-N for display and writes the rest to a polymorphs CSV (S1).
-        docs_sorted = sorted(docs, key=lambda d: d.energy_above_hull or 999)
+        # NB: use an explicit None check — `d.energy_above_hull or 999` would treat
+        # the ground state (hull == 0.0, falsy) as 999 and sort it LAST instead of
+        # first, flipping the whole stability order vs. Materials Project.
+        docs_sorted = sorted(
+            docs,
+            key=lambda d: (d.energy_above_hull
+                           if d.energy_above_hull is not None else 999))
         return [mp_doc_to_card(d) for d in docs_sorted[:MAX_RESULTS]]
 
     def get_structure(self, source_id: str):

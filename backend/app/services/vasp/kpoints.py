@@ -78,6 +78,41 @@ def generate_kpoints_by_accuracy(
     return str(kpoints), kppa
 
 
+def generate_kpoints_explicit(
+    mesh: list[int],
+    gamma_centered: bool = True,
+) -> tuple[str, list[int]]:
+    """Build a KPOINTS file with an EXACT, user-specified subdivision mesh.
+
+    `mesh` is three positive integers, e.g. [2, 2, 2] for a 2×2×2 grid or
+    [1, 1, 1] for a single Γ point — the coarsest mesh that exists. Unlike the
+    accuracy path this ignores k-point density entirely and writes exactly what
+    was asked. Raises ValueError if any subdivision is < 1: a mesh cannot be
+    reduced below 1×1×1.
+
+    Returns ``(kpoints_text, mesh_used)``.
+    """
+    if len(mesh) != 3:
+        raise ValueError(
+            "An explicit k-point mesh needs exactly three values, e.g. '2 2 2'.")
+    clean: list[int] = []
+    for v in mesh:
+        iv = int(v)
+        if iv < 1:
+            raise ValueError(
+                "A k-point mesh can't be reduced below 1 1 1 — a single Γ point "
+                "is the coarsest grid possible. Use '1 1 1' for the minimum.")
+        clean.append(iv)
+
+    from pymatgen.io.vasp.inputs import Kpoints
+    kpoints = (Kpoints.gamma_automatic(kpts=tuple(clean)) if gamma_centered
+               else Kpoints.monkhorst_automatic(kpts=tuple(clean)))
+    style = "Gamma-centered" if gamma_centered else "Monkhorst-Pack"
+    kpoints.comment = (
+        f"Materia KPOINTS — explicit {clean[0]}x{clean[1]}x{clean[2]} mesh ({style})")
+    return str(kpoints), clean
+
+
 def generate_line_kpoints(structure, divisions: int = 40) -> str:
     """Generate a line-mode KPOINTS file along the high-symmetry path (for bands).
 

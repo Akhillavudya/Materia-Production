@@ -19,8 +19,19 @@ from app.services.search.providers.oqmd import OQMDProvider
 
 logger = get_logger(__name__)
 
-# Priority order from the spec.
+# Priority order from the spec (bulk/3D first).
 _DEFAULT_ORDER: list[Source] = [Source.MP, Source.C2DB, Source.OQMD]
+
+# For 2D queries, C2DB (a dedicated 2D-materials db) is the authoritative source,
+# so try it first — otherwise MP's bulk hit for the same formula shadows it.
+_2D_ORDER: list[Source] = [Source.C2DB, Source.MP, Source.OQMD]
+
+
+def _is_2d(dimensionality: str | None) -> bool:
+    """True when the query explicitly asks for a 2D material ("2D"/"2d"/"2")."""
+    if not dimensionality:
+        return False
+    return dimensionality.strip().lower().rstrip("d") == "2"
 
 
 @dataclass
@@ -43,9 +54,15 @@ class SearchService:
         query: MaterialQuery,
         order: list[Source] | None = None,
     ) -> SearchResult:
-        """First-hit-wins search across providers in priority order."""
+        """First-hit-wins search across providers in priority order.
+
+        An explicit `order` always wins; otherwise a 2D query prefers C2DB and
+        every other query uses the default bulk-first order.
+        """
+        if order is None:
+            order = _2D_ORDER if _is_2d(query.dimensionality) else _DEFAULT_ORDER
         result = SearchResult()
-        for source in (order or _DEFAULT_ORDER):
+        for source in order:
             provider = self._by_source.get(source)
             if provider is None:
                 continue

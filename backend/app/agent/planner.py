@@ -131,13 +131,16 @@ def _validate(raw: dict) -> dict | None:
     }
 
 
-async def make_plan(messages: list[dict]) -> dict | None:
+async def make_plan(messages: list[dict], context: str | None = None) -> dict | None:
     """Best-effort: return a validated plan, or ``None`` to skip the gate.
 
     ``messages`` is the neutral conversation (user/assistant text turns). Tool
     turns, if any, are ignored — the planner reasons from the dialogue only.
+    ``context`` is optional live session state (e.g. the active structure) so the
+    planner doesn't propose a step to upload a structure the user already has.
     """
-    convo = [{"role": "system", "content": PLANNER_PROMPT}]
+    system = PLANNER_PROMPT if not context else f"{PLANNER_PROMPT}\n\n{context}"
+    convo = [{"role": "system", "content": system}]
     for m in messages:
         role = m.get("role")
         if role in ("user", "assistant") and m.get("content"):

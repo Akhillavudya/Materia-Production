@@ -13,8 +13,9 @@ import { useEffect, useState } from 'react'
 import { TOOL_FORMS } from './toolForms'
 import { getAuthConfig } from '../../api/auth'
 import {
-  uploadFiles, fetchSessionFilesGrouped, fetchCalculators,
+  uploadFiles, fetchSessionFilesGrouped, fetchCalculators, fetchSqsSublattices,
   launchOptimize, launchMd, launchPhonons, launchElastic, launchSqs, launchNeb,
+  listMigrationPaths,
   launchMakeSupercell, launchAddVacuum, launchMakeSlab, launchAddAdsorbate,
   launchConvertStructure,
   launchGenerateVaspInputs, launchGeneratePoscar, launchGenerateKpoints,
@@ -207,6 +208,13 @@ function ToolCard({ sessionId, spec, models, heavyEnabled, isOpen, onToggle, onL
   const [calcModel, setCalcModel] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null)
+  // SQS pre-flight: detected sublattices (null = not run yet).
+  const [subs, setSubs] = useState(null)
+  const [detecting, setDetecting] = useState(false)
+  // NEB pre-flight: listed migration hops + which pair is picked.
+  const [hops, setHops] = useState(null)
+  const [listing, setListing] = useState(false)
+  const [pickedHop, setPickedHop] = useState(null)
 
   // Heavy ML-potential tools can't run on the lite web server. Keep the card
   // visible but route Run to the desktop app instead of launching a job.
@@ -214,13 +222,72 @@ function ToolCard({ sessionId, spec, models, heavyEnabled, isOpen, onToggle, onL
 
   const setField = (name, val) => setValues((p) => ({ ...p, [name]: val }))
 
+  // "Detect sublattices" (SQS): list the structure's Wyckoff sites so the user
+  // can see which one to alloy. Clicking a chip seeds the composition field.
+  const detectSublattices = async () => {
+    setMsg(null); setDetecting(true)
+    try {
+      const res = await fetchSqsSublattices(sessionId, file)
+      setSubs(res.sublattices || [])
+      if (!res.sublattices?.length) setMsg({ kind: 'err', text: 'No sublattices found.' })
+    } catch (e) {
+      setMsg({ kind: 'err', text: e.message || 'Failed to detect sublattices.' })
+    } finally {
+      setDetecting(false)
+    }
+  }
+
+  // "List hops" (NEB / Migration Paths): show candidate source→dest pairs for a
+  // migrating element. On the NEB card, clicking a chip fills source/dest so the
+  // job runs that exact hop; on the standalone card it's an informational list.
+  const listHops = async () => {
+    const element = String(values.element ?? values.migrating_element ?? '').trim()
+    if (!element) { setMsg({ kind: 'err', text: 'Enter a migrating element (e.g. Mg).' }); return }
+    setMsg(null); setListing(true); setPickedHop(null)
+    try {
+      const res = await listMigrationPaths(sessionId, {
+        element, cutoff: values.cutoff, structure: file,
+      })
+      setHops(res.pairs || [])
+      if (!res.pairs?.length) setMsg({ kind: 'err', text: `No ${element} hops found within the cutoff.` })
+    } catch (e) {
+      setMsg({ kind: 'err', text: e.message || 'Failed to list migration paths.' })
+    } finally {
+      setListing(false)
+    }
+  }
+
+  // Pick a hop chip → on the NEB card, drive source_site / dest_site.
+  const pickHop = (p) => {
+    setPickedHop(`${p.source}-${p.dest}`)
+    if (spec.key === 'neb') {
+      setValues((v) => ({ ...v, source_site: Number(p.source), dest_site: Number(p.dest) }))
+    }
+  }
+
+  // Append "<id>=<el>0.75,X0.25" template to the composition field for editing.
+  const seedComposition = (s) => {
+    const tmpl = `${s.id}=${s.element}0.75,X0.25`
+    setValues((p) => {
+      const cur = String(p.sublattice_comp || '').trim()
+      return { ...p, sublattice_comp: cur ? `${cur} ; ${tmpl}` : tmpl }
+    })
+  }
+
+  // Is the NEB card currently in "two files" mode (vs auto-build from element)?
+  const nebFilesMode = spec.key === 'neb' && values.mode === 'files'
+
   const run = async () => {
     setMsg(null)
     if (heavyLocked) {
       setMsg({ kind: 'err', text: DESKTOP_ONLY_MSG }); return
     }
-    if (spec.twoFiles && (!initial || !final)) {
+    if (nebFilesMode && (!initial || !final)) {
       setMsg({ kind: 'err', text: 'Pick both an initial and a final structure.' }); return
+    }
+    if (spec.twoFiles && !nebFilesMode && spec.key === 'neb'
+        && !String(values.migrating_element ?? '').trim()) {
+      setMsg({ kind: 'err', text: 'Enter a migrating element, or switch to Two files mode.' }); return
     }
     // client-side guard for any required text field (e.g. adsorbate molecule)
     const missing = (spec.fields || []).find(
@@ -232,8 +299,17 @@ function ToolCard({ sessionId, spec, models, heavyEnabled, isOpen, onToggle, onL
     try {
       let res
       if (spec.key === 'neb') {
-        res = await launchNeb(sessionId, initial, final, {
-          nImages: values.n_images, climb: values.climb,
+        res = await launchNeb(sessionId, nebFilesMode ? {
+          initial, final,
+          nImages: values.n_images, endpointFmax: values.endpoint_fmax, climb: values.climb,
+          runFrequencies: values.run_frequencies, emitVaspInputs: values.emit_vasp_inputs,
+          calculatorType: calcType, calculatorModel: calcModel || undefined,
+        } : {
+          migratingElement: values.migrating_element,
+          sourceSite: values.source_site, destSite: values.dest_site,
+          structure: file,
+          nImages: values.n_images, endpointFmax: values.endpoint_fmax, climb: values.climb,
+          runFrequencies: values.run_frequencies, emitVaspInputs: values.emit_vasp_inputs,
           calculatorType: calcType, calculatorModel: calcModel || undefined,
         })
       } else {
@@ -317,14 +393,112 @@ function ToolCard({ sessionId, spec, models, heavyEnabled, isOpen, onToggle, onL
       {/* body */}
       {isOpen && (
         <div style={{ padding: '0 11px 12px', display: 'flex', flexDirection: 'column', gap: 11 }}>
-          {/* file picker(s) */}
-          {spec.twoFiles ? (
-            <div style={{ display: 'flex', gap: 8 }}>
-              <FilePick label="Initial state" file={initial} onPick={setInitial} accent="#2563eb" />
-              <FilePick label="Final state" file={final} onPick={setFinal} accent="#16a34a" />
+          {/* file picker(s) — NEB shows two only in "Two files" mode */}
+          {spec.twoFiles && nebFilesMode ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <FilePick label="Initial state" file={initial} onPick={setInitial} accent="#2563eb" />
+                <FilePick label="Final state" file={final} onPick={setFinal} accent="#16a34a" />
+              </div>
+              <div style={{
+                fontSize: 10, lineHeight: 1.45, color: T.inkSoft, fontFamily: FONT_BODY,
+                background: 'var(--surface-2, #f6f7f9)', border: '1px solid var(--border, #e3e6ea)',
+                borderRadius: 6, padding: '7px 9px',
+              }}>
+                Paste <b>optimized (relaxed)</b> structures — run <b>Optimize</b> on
+                each endpoint first, then upload its <code>CONTCAR</code> here. Both must
+                have the <b>same atoms and same cell</b>; only the atom positions differ
+                (e.g. one atom moved from site A → site B). NEB re-relaxes the endpoints,
+                but a poor start gives a meaningless barrier.
+              </div>
             </div>
           ) : (
             <FilePick label="Structure — uses active if empty" file={file} onPick={setFile} accent={spec.color} />
+          )}
+
+          {/* SQS pre-flight: detect + list the structure's sublattices */}
+          {spec.analyze === 'sublattices' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+              <button
+                onClick={detectSublattices}
+                disabled={detecting}
+                style={{
+                  padding: '7px 0', borderRadius: 6, cursor: detecting ? 'default' : 'pointer',
+                  border: `1px solid ${spec.color}`, background: `${spec.color}12`,
+                  color: spec.color, fontSize: 11.5, fontWeight: 600, fontFamily: FONT_DISPLAY,
+                }}
+              >
+                {detecting ? 'Detecting…' : '⬡ Detect sublattices'}
+              </button>
+              {subs && subs.length > 0 && (
+                <div style={{
+                  border: `1px solid ${T.border}`, borderRadius: 6, padding: '7px 8px',
+                  background: T.bg, display: 'flex', flexDirection: 'column', gap: 5,
+                }}>
+                  <span style={{ fontSize: 10, color: T.inkFaint, fontFamily: FONT_BODY }}>
+                    Click a site to seed the composition, then edit the elements/fractions:
+                  </span>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                    {subs.map((s) => (
+                      <button key={s.id} onClick={() => seedComposition(s)}
+                        style={{
+                          padding: '3px 8px', borderRadius: 999, cursor: 'pointer',
+                          border: `1px solid ${T.border}`, background: T.surface,
+                          color: T.ink, fontSize: 10.5, fontFamily: FONT_MONO,
+                        }}>
+                        {s.id} · {s.element}×{s.count}{s.wyckoff ? ` (${s.wyckoff})` : ''}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* NEB / Migration Paths pre-flight: list hops → clickable chips */}
+          {spec.analyze === 'migration' && (spec.analyzeOnly || !nebFilesMode) && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+              <button
+                onClick={listHops}
+                disabled={listing}
+                style={{
+                  padding: '7px 0', borderRadius: 6, cursor: listing ? 'default' : 'pointer',
+                  border: `1px solid ${spec.color}`, background: `${spec.color}12`,
+                  color: spec.color, fontSize: 11.5, fontWeight: 600, fontFamily: FONT_DISPLAY,
+                }}
+              >
+                {listing ? 'Listing…' : '⬈ List hops'}
+              </button>
+              {hops && hops.length > 0 && (
+                <div style={{
+                  border: `1px solid ${T.border}`, borderRadius: 6, padding: '7px 8px',
+                  background: T.bg, display: 'flex', flexDirection: 'column', gap: 5,
+                }}>
+                  <span style={{ fontSize: 10, color: T.inkFaint, fontFamily: FONT_BODY }}>
+                    {spec.key === 'neb'
+                      ? 'Click a hop to set source→dest (shortest is usually the real path):'
+                      : 'Candidate hops (shortest first) — use a pair in the NEB card below:'}
+                  </span>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                    {hops.map((p) => {
+                      const key = `${p.source}-${p.dest}`
+                      const on = pickedHop === key
+                      return (
+                        <button key={key} onClick={() => pickHop(p)}
+                          style={{
+                            padding: '3px 8px', borderRadius: 999, cursor: 'pointer',
+                            border: `1px solid ${on ? spec.color : T.border}`,
+                            background: on ? `${spec.color}1A` : T.surface,
+                            color: on ? spec.color : T.ink, fontSize: 10.5, fontFamily: FONT_MONO,
+                          }}>
+                          {p.source}→{p.dest} · {p.distance_A} Å
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
           )}
 
           {/* param grid — fields may be conditionally hidden via showIf(values) */}
@@ -334,15 +508,17 @@ function ToolCard({ sessionId, spec, models, heavyEnabled, isOpen, onToggle, onL
             return (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 9, alignItems: 'end' }}>
                 {visible.map((f) => (
-                  <Field key={f.name} spec={f} value={values[f.name]} values={values}
-                    onChange={(v) => setField(f.name, v)} />
+                  <div key={f.name} style={f.full ? { gridColumn: '1 / -1' } : undefined}>
+                    <Field spec={f} value={values[f.name]} values={values}
+                      onChange={(v) => setField(f.name, v)} />
+                  </div>
                 ))}
               </div>
             )
           })()}
 
           {/* teal-tinted Potential row */}
-          {spec.calculator && (
+          {spec.calculator && !spec.analyzeOnly && (
             <div style={{
               background: T.tealWash, border: `1px solid ${T.tealBorder}`, borderRadius: 6,
               padding: '8px 9px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 9,
@@ -370,19 +546,21 @@ function ToolCard({ sessionId, spec, models, heavyEnabled, isOpen, onToggle, onL
             </div>
           )}
 
-          {/* run */}
-          <button
-            onClick={run}
-            disabled={busy}
-            style={{
-              padding: '9px 0', borderRadius: 6, border: 'none', cursor: busy ? 'default' : 'pointer',
-              background: busy ? '#9ca3af' : heavyLocked ? 'var(--text-muted)' : T.teal,
-              color: '#fff', fontSize: 12.5, fontWeight: 600,
-              fontFamily: FONT_DISPLAY,
-            }}
-          >
-            {busy ? 'Starting…' : heavyLocked ? 'Available in desktop app' : `Run ${spec.label}`}
-          </button>
+          {/* run — analyze-only cards (Migration Paths) have no job to launch */}
+          {!spec.analyzeOnly && (
+            <button
+              onClick={run}
+              disabled={busy}
+              style={{
+                padding: '9px 0', borderRadius: 6, border: 'none', cursor: busy ? 'default' : 'pointer',
+                background: busy ? '#9ca3af' : heavyLocked ? 'var(--text-muted)' : T.teal,
+                color: '#fff', fontSize: 12.5, fontWeight: 600,
+                fontFamily: FONT_DISPLAY,
+              }}
+            >
+              {busy ? 'Starting…' : heavyLocked ? 'Available in desktop app' : `Run ${spec.label}`}
+            </button>
+          )}
 
           {msg && (
             <div style={{ fontSize: 11, color: msg.kind === 'ok' ? T.tealDeep : '#b91c1c', lineHeight: 1.4, fontFamily: FONT_BODY }}>

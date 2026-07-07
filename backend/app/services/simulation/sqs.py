@@ -11,15 +11,24 @@ must be a real element. An **SQS** is a small ordered supercell whose pair/tripl
 correlations best mimic the truly random alloy, so a finite cell behaves like the
 disordered solid solution.
 
-Pipeline (adapted from the reference notebook, de-interactived):
-  1. Read a **disordered CIF** (sites with partial occupancies).
-  2. Detect the disordered **sublattices** → parent structure + occupancy spec.
-  3. Write ATAT inputs: ``rndstr.in`` (absolute Å lattice) + ``sqscell.out``.
-  4. If no cutoff given, recommend one from a **nearest-neighbour shell** analysis.
-  5. ``corrdump`` + ``getclus`` to set up the cluster correlations.
-  6. Launch **N parallel ``mcsqs``** searches, monitoring the objective function;
+Pipeline (SimplySQS-style: start from a NORMAL ordered structure):
+  1. Read any structure — **ordered is fine** (POSCAR/CIF/…), or already-disordered.
+  2. If the caller passes a **sublattice composition** (e.g. "on the Ti sites put
+     Ti0.6 Zr0.4"), inject those partial occupancies onto the matching sublattice —
+     this is what turns an ordered parent (SrTiO₃) into the disordered target
+     ((Sr,Ba)(Ti,Zr)O₃) the SQS represents.
+  3. Detect the disordered **sublattices** → parent structure + occupancy spec.
+  4. Write ATAT inputs: ``rndstr.in`` (absolute Å lattice) + ``sqscell.out``.
+  5. If no cutoff given, recommend one from a **nearest-neighbour shell** analysis.
+  6. ``corrdump`` + ``getclus`` to set up the cluster correlations.
+  7. Launch **N parallel ``mcsqs``** searches, monitoring the objective function;
      stop at a target objective, a time budget, or job cancellation.
-  7. Take the best ``bestsqs`` and **convert it to a POSCAR**.
+  8. Take the best ``bestsqs``, **convert it to a POSCAR**, and (optionally)
+     **relax it with an ML potential** (MACE by default).
+
+The companion ``list_sublattices()`` reports the symmetry-distinct (Wyckoff)
+sites of any structure so the UI / agent can show the user which sublattices are
+available to substitute on *before* running the search.
 
 ATAT binaries (``corrdump``, ``getclus``, ``mcsqs``) must be on PATH — they are
 compiled into the Docker image. If absent the service returns a clear error.
@@ -50,21 +59,36 @@ def run_sqs(
     output_dir:        str,
     target_comp:       Optional[dict] = None,
     substitutions:     Optional[list] = None,
+    sublattice_comp:   Optional[dict] = None,
     supercell:         tuple = (2, 2, 2),
     cutoff:            Optional[float] = None,
     n_parallel:        int   = 4,
     target_objective:  float = -0.99,
     occ_threshold:     float = 0.05,
     time_budget_s:     int   = 600,
+    symprec:           float = 0.1,
+    relax:             bool  = True,
+    calculator:        Optional[dict] = None,
     progress_callback: Optional[Callable[..., None]] = None,
 ) -> dict:
     """Generate an SQS with ATAT mcsqs. Returns the standard result envelope.
 
-    ``substitutions`` (optional) lets an *ordered* input become disordered before
-    the search: a list of ``{"from": "Si", "to": "S", "fraction": 0.25}`` dicts,
-    meaning "replace 25% of every Si site's occupancy with S". This is what makes
-    a request like "substitute 25% of Si with S in MgSi2Se4" possible — SQS itself
-    needs partial occupancies, and this injects them onto the matching sublattice.
+    Accepts a **normal ordered structure** — SQS no longer requires a disordered
+    CIF. There are three ways to define the disorder the SQS represents:
+
+    * ``sublattice_comp`` (the SimplySQS way, preferred): a dict mapping a
+      sublattice — keyed by the element currently on it (e.g. ``"Ti"``) or a
+      Wyckoff id from :func:`list_sublattices` (e.g. ``"Ti(1b)"``) — to a target
+      occupancy dict, e.g. ``{"Ti": {"Ti": 0.6, "Zr": 0.4}}``. Every site on that
+      sublattice is given those partial occupancies. This turns an ordered parent
+      (SrTiO₃) into the disordered target ((Ti,Zr) on the B site) to search.
+    * ``substitutions`` (legacy): ``[{"from": "Si", "to": "S", "fraction": 0.25}]``
+      — replace 25% of every Si site's occupancy with S.
+    * an already-disordered input CIF (partial occupancies baked in).
+
+    ``relax`` (default True): after mcsqs finds the best ordering, relax the SQS
+    supercell with an ML potential (``calculator``, MACE by default) so the result
+    is a physically reasonable structure, not just the ideal-lattice placement.
     """
     try:
         import numpy as np
@@ -92,7 +116,17 @@ def run_sqs(
     except Exception as e:  # noqa: BLE001
         return {"status": "error", "message": f"Failed to read structure: {e}"}
 
-    # ── 1b. Inject partial occupancies from a substitution spec (if given) ──────
+    # ── 1b. Turn an ordered parent into the disordered target ──────────────────
+    # Preferred: a per-sublattice composition ("on the Ti sites put Ti0.6 Zr0.4").
+    if sublattice_comp:
+        try:
+            structure, applied = _apply_sublattice_composition(
+                structure, sublattice_comp, symprec)
+        except ValueError as e:
+            return {"status": "error", "message": str(e)}
+        logger.info("[SQS] applied sublattice composition: %s", applied)
+
+    # Legacy: fractional element→element substitution ("replace 25% of Si with S").
     if substitutions:
         try:
             structure, applied = _apply_partial_substitutions(structure, substitutions)
@@ -105,14 +139,26 @@ def run_sqs(
         structure, target_comp, occ_threshold)
     active = {k: v for k, v in sqs_info.items() if len(v["occupancies"]) > 1}
     if not active:
+        # Not a bug: an ordered structure with no composition given simply has
+        # nothing to randomise. Tell the user which sublattices they can target.
+        subs = list_sublattices(cif_path, symprec=symprec)
+        hint = ""
+        if subs.get("status") == "success" and subs.get("sublattices"):
+            names = ", ".join(
+                f'{s["id"]} ({s["element"]}×{s["count"]})'
+                for s in subs["sublattices"])
+            hint = (
+                f" This structure has these sublattices you can substitute on: "
+                f"{names}. For example, pass a composition like "
+                f'{{"{subs["sublattices"][0]["element"]}": '
+                f'{{"{subs["sublattices"][0]["element"]}": 0.6, "X": 0.4}}}} '
+                "to make a random alloy on that site.")
         return {
             "status": "error",
             "message": (
-                "No disordered sublattice found. SQS needs partial site "
-                "occupancies. Either provide a disordered CIF, or pass a "
-                "substitution like 'Si->S:0.25' (replace 25% of Si with S) so "
-                "the tool can build the disordered sublattice from an ordered "
-                "structure."
+                "SQS needs a disordered sublattice to randomise, but every site "
+                "in this structure is fully occupied. Give a target composition "
+                "for one of the sublattices (e.g. \"Ti=Ti0.6,Zr0.4\")." + hint
             ),
         }
 
@@ -168,7 +214,8 @@ def run_sqs(
         return {"status": "error", "message": f"bestsqs → POSCAR failed: {e}"}
 
     files = {
-        "contcar":          str(poscar_path),         # the SQS supercell POSCAR
+        "sqs_poscar":       str(poscar_path),          # the ideal-lattice SQS
+        "contcar":          str(poscar_path),          # active structure (overwritten by relax below)
         "bestsqs_out":      str(final_out),
         "rndstr_in":        str(out_dir / "rndstr.in"),
         "sqscell_out":      str(out_dir / "sqscell.out"),
@@ -181,13 +228,48 @@ def run_sqs(
             files[opt.replace(".", "_")] = str(p)
 
     comp = sqs_structure.composition.reduced_formula
+
+    # ── 8. Relax the SQS supercell with an ML potential (optional) ────────────
+    relax_note, final_energy = "", None
+    if relax:
+        try:
+            from app.services.simulation.optimization import run_optimization
+            relax_dir = out_dir / "relax"
+            opt = run_optimization(
+                poscar_path=str(poscar_path),
+                output_dir=str(relax_dir),
+                fmax=0.05,
+                cell_relax="full",
+                calculator=calculator or {"type": "mace"},
+                generate_vasp_inputs=False,
+                progress_callback=progress_callback,
+            )
+            if opt.get("status") in ("success", "converged", "not_converged"):
+                relaxed = opt.get("files", {}).get("contcar")
+                if relaxed and Path(relaxed).exists():
+                    files["relaxed_contcar"] = str(relaxed)
+                    files["contcar"] = str(relaxed)   # relaxed cell becomes active
+                    files["relax_energy_csv"] = opt.get("files", {}).get("energy_csv", "")
+                    final_energy = opt.get("final_energy")
+                    relax_note = (
+                        f" Relaxed with {(calculator or {}).get('type', 'mace')}"
+                        + (f" → {final_energy:.3f} eV" if final_energy is not None else "")
+                        + "."
+                    )
+            else:
+                relax_note = f" (MLP relaxation skipped: {opt.get('message', 'failed')})"
+        except Exception as e:  # noqa: BLE001 — never fail the whole SQS on a relax hiccup
+            logger.warning("[SQS] MLP relaxation failed: %s", e)
+            relax_note = f" (MLP relaxation skipped: {e})"
+
     message = (
         f"SQS generated for {comp}: {len(sqs_structure)} atoms "
         f"({supercell[0]}×{supercell[1]}×{supercell[2]} supercell), "
         f"best objective {best_obj:.4f} (run {best_run}), cutoff {cutoff:.3f} Å."
+        + relax_note
     )
     logger.info("[SQS] %s", message)
-    return {
+    result = {
         "status":           "success",
         "message":          message,
         "formula":          comp,
@@ -197,8 +279,12 @@ def run_sqs(
         "best_objective":   round(float(best_obj), 4),
         "best_run":         best_run,
         "n_parallel":       n_parallel,
+        "relaxed":          bool(relax and "relaxed_contcar" in files),
         "files":            files,
     }
+    if final_energy is not None:
+        result["final_energy"] = float(final_energy)
+    return result
 
 
 # ── Partial substitution: ordered structure → disordered sublattice ───────────
@@ -237,6 +323,132 @@ def _apply_partial_substitutions(structure, substitutions):
                 f"Cannot substitute {frm}->{to}: no '{frm}' sites in the structure "
                 f"(elements present: {', '.join(present)}).")
         applied.append(f"{frm}->{to} on {matched} site(s) at {frac:g}")
+    return structure, applied
+
+
+# ── Wyckoff sublattice listing (SimplySQS-style pre-flight) ───────────────────
+
+def _sublattice_groups(structure, symprec: float) -> list:
+    """Group sites into symmetry-distinct sublattices (Wyckoff positions).
+
+    Returns a list of dicts ``{id, element, wyckoff, count, indices,
+    example_frac}``. Falls back to grouping by element if the symmetry finder
+    can't analyse the cell (e.g. already-disordered or awkward geometry).
+    """
+    def _element_of(site) -> str:
+        if site.is_ordered:
+            return site.specie.symbol
+        # disordered site → name it by its dominant species
+        return max(site.species.items(), key=lambda kv: kv[1])[0].symbol
+
+    groups: list = []
+    try:
+        from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
+        sga = SpacegroupAnalyzer(structure, symprec=symprec)
+        sym = sga.get_symmetrized_structure()
+        for idxs, wyck in zip(sym.equivalent_indices, sym.wyckoff_symbols):
+            groups.append({
+                "element":      _element_of(structure[idxs[0]]),
+                "wyckoff":      wyck,
+                "indices":      list(idxs),
+            })
+    except Exception:  # noqa: BLE001 — fall back to element grouping
+        by_el: dict = defaultdict(list)
+        for i, site in enumerate(structure):
+            by_el[_element_of(site)].append(i)
+        groups = [{"element": el, "wyckoff": "", "indices": idxs}
+                  for el, idxs in by_el.items()]
+
+    # Give each sublattice a short id; disambiguate repeated elements by Wyckoff.
+    el_counts: dict = defaultdict(int)
+    for g in groups:
+        el_counts[g["element"]] += 1
+    out: list = []
+    for g in groups:
+        el = g["element"]
+        gid = el if el_counts[el] == 1 or not g["wyckoff"] else f"{el}({g['wyckoff']})"
+        out.append({
+            "id":           gid,
+            "element":      el,
+            "wyckoff":      g["wyckoff"],
+            "count":        len(g["indices"]),
+            "indices":      g["indices"],
+            "example_frac": [round(float(x), 4)
+                             for x in structure[g["indices"][0]].frac_coords],
+        })
+    return out
+
+
+def list_sublattices(structure_path: str, symprec: float = 0.1) -> dict:
+    """List the symmetry-distinct sublattices of a structure (for the UI/agent).
+
+    Lets the user see *which* sites they can substitute on before running SQS —
+    e.g. SrTiO₃ → an Sr sublattice, a Ti sublattice, and an O sublattice.
+    """
+    try:
+        from pymatgen.core import Structure
+    except ImportError as e:
+        return {"status": "error", "message": f"Missing dependency: {e}"}
+    try:
+        structure = Structure.from_file(str(structure_path))
+    except Exception as e:  # noqa: BLE001
+        return {"status": "error", "message": f"Failed to read structure: {e}"}
+
+    subs = _sublattice_groups(structure, symprec)
+    return {
+        "status":         "success",
+        "formula":        structure.composition.reduced_formula,
+        "n_sites":        len(structure),
+        "n_sublattices":  len(subs),
+        "sublattices":    [{k: v for k, v in s.items() if k != "indices"}
+                           for s in subs],
+        "message": (
+            f"{structure.composition.reduced_formula}: {len(subs)} sublattice(s) — "
+            + ", ".join(f'{s["id"]} ({s["element"]}×{s["count"]}'
+                        + (f", {s['wyckoff']}" if s["wyckoff"] else "") + ")"
+                        for s in subs)
+        ),
+    }
+
+
+def _apply_sublattice_composition(structure, sublattice_comp: dict, symprec: float):
+    """Place a target occupancy on every site of a named sublattice.
+
+    ``sublattice_comp`` maps a sublattice key → occupancy dict, e.g.
+    ``{"Ti": {"Ti": 0.6, "Zr": 0.4}}``. A key matches a sublattice by its element
+    (``"Ti"``) or by a Wyckoff id from :func:`list_sublattices` (``"Ti(1b)"``).
+    Occupancies are normalised to sum to 1. Returns (structure, applied_summary).
+    Raises ValueError if a key matches no sublattice or an occupancy is malformed.
+    """
+    groups = _sublattice_groups(structure, symprec)
+    applied: list = []
+    for key, occ in sublattice_comp.items():
+        key = str(key).strip()
+        if not isinstance(occ, dict) or not occ:
+            raise ValueError(
+                f"Composition for sublattice '{key}' must be an element→fraction "
+                f"map like {{'Ti': 0.6, 'Zr': 0.4}} (got {occ!r}).")
+        try:
+            occ = {str(el).strip(): float(v) for el, v in occ.items()}
+        except (TypeError, ValueError):
+            raise ValueError(f"Non-numeric occupancy in sublattice '{key}': {occ!r}.")
+        total = sum(occ.values())
+        if total <= 0:
+            raise ValueError(f"Occupancies for sublattice '{key}' sum to {total}.")
+        occ = {el: v / total for el, v in occ.items()}
+
+        matched = [g for g in groups if g["id"] == key or g["element"] == key]
+        if not matched:
+            avail = ", ".join(f'{g["id"]} ({g["element"]})' for g in groups)
+            raise ValueError(
+                f"No sublattice '{key}' in this structure. Available: {avail}.")
+        n_sites = 0
+        for g in matched:
+            for i in g["indices"]:
+                structure.replace(i, occ)
+                n_sites += 1
+        pretty = ",".join(f"{el}{v:g}" for el, v in occ.items())
+        applied.append(f"{key}->{pretty} on {n_sites} site(s)")
     return structure, applied
 
 

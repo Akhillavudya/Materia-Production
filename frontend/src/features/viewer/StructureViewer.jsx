@@ -188,6 +188,7 @@ function parsePoscarInfo(content) {
 export default function StructureViewer({ relPath, fileName, onClose }) {
   const viewerRef  = useRef(null)     // DOM div for 3Dmol
   const glViewerRef = useRef(null)    // 3Dmol viewer instance
+  const isAnimRef  = useRef(false)    // true when showing a multi-frame .xyz
 
   const [loading,  setLoading]  = useState(true)
   const [error,    setError]    = useState(null)
@@ -213,7 +214,11 @@ export default function StructureViewer({ relPath, fileName, onClose }) {
         if (cancelled) return
 
         const content = fileData.content
-        setInfo(parsePoscarInfo(content))
+        // A multi-frame .xyz (e.g. the NEB path) plays as an animation; a POSCAR
+        // is a single static frame.
+        const isAnim = /\.xyz$/i.test(relPath)
+        isAnimRef.current = isAnim
+        if (!isAnim) setInfo(parsePoscarInfo(content))
 
         // wait for DOM element to be ready
         if (!viewerRef.current) return
@@ -227,17 +232,23 @@ export default function StructureViewer({ relPath, fileName, onClose }) {
 
         glViewerRef.current = viewer
 
-        // add the structure — POSCAR format
-        viewer.addModel(content, 'vasp')
-
-        // default style
-        viewer.setStyle({}, { stick: { radius: 0.15, colorscheme: 'Jmol' } })
-
-        // show unit cell box
-        viewer.addUnitCell()
-
-        viewer.zoomTo()
-        viewer.render()
+        if (isAnim) {
+          // load every frame and loop through them (the NEB migration path)
+          viewer.addModelsAsFrames(content, 'xyz')
+          viewer.setStyle({}, { stick: { radius: 0.15, colorscheme: 'Jmol' } })
+          viewer.zoomTo()
+          viewer.animate({ loop: 'forward', reps: 0 })
+          viewer.render()
+        } else {
+          // add the structure — POSCAR format
+          viewer.addModel(content, 'vasp')
+          // default style
+          viewer.setStyle({}, { stick: { radius: 0.15, colorscheme: 'Jmol' } })
+          // show unit cell box
+          viewer.addUnitCell()
+          viewer.zoomTo()
+          viewer.render()
+        }
 
         setLoading(false)
 
@@ -265,7 +276,7 @@ export default function StructureViewer({ relPath, fileName, onClose }) {
   // ── toggle unit cell ───────────────────────────────────────────────────────
   useEffect(() => {
     const viewer = glViewerRef.current
-    if (!viewer) return
+    if (!viewer || isAnimRef.current) return   // .xyz frames carry no unit cell
 
     if (showCell) {
       viewer.addUnitCell()

@@ -93,8 +93,12 @@ active structure for later steps.
 ν, Pugh, Born stability) with an ML potential (async job).
 - compute_phonons — compute the phonon band structure + DOS via finite displacements \
 with an ML potential; reports min frequency / dynamic stability (async job).
-- generate_sqs — generate a Special Quasi-random Structure for a DISORDERED input \
-(partial site occupancies) via ATAT mcsqs (async job).
+- list_sublattices — list the symmetry-distinct sublattices (Wyckoff sites) of a \
+session structure, so you can show the user which site to make into a random alloy \
+before generate_sqs (fast).
+- generate_sqs — generate a Special Quasi-random Structure (random alloy) from a \
+NORMAL ordered structure via ATAT mcsqs; give a per-sublattice composition like \
+`sublattice_comp="Ti=Ti0.6,Zr0.4"`; the result is ML-relaxed (async job).
 - compute_neb — compute a migration/diffusion barrier (Nudged Elastic Band) between \
 TWO session structures (an initial state and a final state) with an ML potential; \
 returns the forward/reverse activation barrier and a minimum-energy-path plot \
@@ -124,6 +128,11 @@ results you do not have.
 initial state as poscar_name and the final state as final_poscar_name. If the user \
 only gives one structure, ask them for (or help them build) the second endpoint \
 before calling it.
+- generate_sqs works from a normal ORDERED structure — do NOT require a disordered \
+input. When the user asks for a random alloy / solid solution (e.g. "make an SQS of \
+SrTiO3 with 40% Zr on the Ti site", "20% doping"), pass the composition via \
+`sublattice_comp` (e.g. "Ti=Ti0.6,Zr0.4"). If it is unclear which site the user \
+means, call list_sublattices first and show the options, then call generate_sqs.
 - IMPORTANT: you CAN compute elastic constants, phonons, SQS, and NEB migration \
 barriers yourself — they run with an ML potential (MACE/MatterSim) as background \
 jobs. When the user asks to "compute the elastic tensor", "compute phonons / phonon \
@@ -143,7 +152,10 @@ succeeded.
 - If you intend to start a job, you MUST emit the tool call. Describing the action \
 in prose is not the same as doing it; only a real tool call runs anything.
 - After a search, present the results as a compact Markdown table (id, formula, \
-crystal system, source, band gap, formation energy). If the result includes a \
+crystal system, source, band gap (eV), energy above hull (eV/atom)) — use the \
+`energy_above_hull_eV_per_atom` field (0 = most stable / on the convex hull), \
+matching Materials Project; do NOT show formation energy. Keep the tool's stability \
+order (most stable first). If the result includes a \
 `polymorphs_csv`, tell the user that the full list of all matches (metadata only) \
 was saved to that CSV so they can browse every polymorph and pick one.
 - Map the user's stated values to the closest tool parameter and just call the \
@@ -204,6 +216,35 @@ def resolve_args(tool_name: str, tool_args: dict, session_dir: str) -> dict:
                 resolved[key] = best
                 logger.info("[Agent] Resolved %s → %s", key, best)
     return resolved
+
+
+def session_structure_context(session_dir: str) -> str | None:
+    """One-line note telling the agent about the session's ACTIVE structure.
+
+    The chat history alone never says "the user just uploaded a structure", so the
+    agent used to ask the user to provide one they had already uploaded. We inject
+    this so the model knows a structure is present and uses it by default.
+    Returns ``None`` when the session has no structure yet.
+    """
+    best = find_best_poscar(session_dir)
+    if not best:
+        return None
+    name = Path(best).name
+    desc = name
+    try:
+        from pymatgen.core import Structure
+        s = Structure.from_file(best)
+        desc = f"{name} ({s.composition.reduced_formula}, {len(s)} atoms)"
+    except Exception:  # noqa: BLE001 — a label is a nicety, never fail the turn
+        pass
+    return (
+        f"SESSION STATE: an ACTIVE structure is already loaded in this session: "
+        f"{desc}. When the user asks to run, generate, build, or modify something "
+        f"and does NOT name a specific file, operate on this active structure — do "
+        f"NOT ask the user to provide or upload a structure (they already have one). "
+        f"Only ask for a file when the user clearly refers to a different structure "
+        f"that is not present."
+    )
 
 
 def pick_material_from_results(step_results: list[dict]) -> dict | None:
@@ -441,7 +482,13 @@ async def _agent_loop(
     system_prompt = SYSTEM_PROMPT
     if not settings.enable_heavy_tools:
         system_prompt += HEAVY_DISABLED_NOTE
-    conv: list[dict] = [{"role": "system", "content": system_prompt}] + [
+    conv: list[dict] = [{"role": "system", "content": system_prompt}]
+    # Tell the model about the session's active structure so it doesn't ask the
+    # user for a file they already uploaded/generated (U1 reverse-ask bug).
+    struct_note = session_structure_context(session_dir)
+    if struct_note:
+        conv.append({"role": "system", "content": struct_note})
+    conv += [
         {"role": m["role"], "content": m.get("content", "")} for m in messages
     ]
     # Confirmed-plan execution: inject the approved plan as a final instruction

@@ -36,3 +36,9 @@ gemini,O2,out_of_scope,Train a brand-new machine-learning potential from scratch
 gemini,O3,out_of_scope,Write me a Python script to scrape product prices off a website.,NONE,(none),,True,,,True,1.86,
 gemini,O4,out_of_scope,Relax my structure with the CHGNet potential.,list_models|NONE,(none),,True,,,True,3.89,
 gemini,C1,conceptual,What is a POSCAR file?,NONE,(none),,True,,,True,3.99,
+
+
+
+
+
+

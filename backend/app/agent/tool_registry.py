@@ -22,8 +22,8 @@ from app.tools.contracts import (
     GenerateSqsInput,
     GenerateVaspInputsInput,
     ListFilesInput,
-    ListMigrationPathsInput,
     ListModelsInput,
+    ListSublatticesInput,
     MakeSlabInput,
     MakeSupercellInput,
     OptimizeStructureInput,
@@ -55,9 +55,9 @@ _TOOL_SPECS = [
     ("run_md_simulation",    "Running MD simulation",         RunMdSimulationInput),
     ("compute_elastic_tensor", "Computing elastic properties", ComputeElasticInput),
     ("compute_phonons",       "Computing phonons",            ComputePhononInput),
+    ("list_sublattices",      "Listing sublattices",          ListSublatticesInput),
     ("generate_sqs",          "Generating SQS (ATAT mcsqs)",  GenerateSqsInput),
     ("compute_neb",           "Computing NEB pathway",        ComputeNebInput),
-    ("list_migration_paths",  "Listing NEB migration hops",   ListMigrationPathsInput),
 ]
 
 

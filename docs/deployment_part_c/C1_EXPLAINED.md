@@ -8,6 +8,7 @@ actually built in C1*, file by file, in beginner-friendly language.
 
 ## 0. The one-paragraph big picture
 
+
 The Materia **desktop app is not a new program** — it is the *exact same* web app
 (React frontend + FastAPI backend) repackaged so the heavy physics runs on the
 user's own computer instead of a tiny free server. We use **Electron** as a

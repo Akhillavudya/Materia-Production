@@ -143,6 +143,8 @@ export default function AsyncJobsPanel({ sessionId, refreshSignal }) {
               <div style={{ marginTop: 5, fontSize: 11, color: 'var(--status-ok-fg)' }}>
                 {job.result?.final_energy != null ? `E = ${job.result.final_energy} eV · ` : ''}
                 {job.result?.barrier_forward_eV != null ? `barrier = ${job.result.barrier_forward_eV} eV · ` : ''}
+                {job.result?.is_true_ts != null ? `${job.result.is_true_ts ? '✓ true TS' : '⚠ not 1 imag mode'} · ` : ''}
+                {job.result?.profile_type ? `${job.result.profile_type.replace(/_/g, ' ')} · ` : ''}
                 {artifacts.length} file{artifacts.length !== 1 ? 's' : ''}
               </div>
             )}

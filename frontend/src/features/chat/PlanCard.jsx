@@ -6,16 +6,9 @@
  * steps and a Confirm / Cancel gate; only Confirm executes the tools. During
  * execution the parent updates each step's `status` so the list checks off live.
  *
- *   plan: { summary, steps: [{ tool, title, detail, status }], final_output }
+ *   plan: { summary, steps: [{ tool, title, detail }], final_output }
  *   planState: 'proposed' | 'running' | 'done' | 'canceled'
  */
-
-const STEP_ICON = {
-  pending: { mark: '○', color: 'var(--text-muted)' },
-  running: { mark: '◐', color: '#6366f1' },
-  done:    { mark: '✓', color: '#16a34a' },
-  error:   { mark: '✕', color: '#dc2626' },
-}
 
 export default function PlanCard({ plan, planState, onConfirm, onCancel }) {
   if (!plan || !plan.steps?.length) return null
@@ -23,6 +16,7 @@ export default function PlanCard({ plan, planState, onConfirm, onCancel }) {
   const proposed = planState === 'proposed'
   const running = planState === 'running'
   const canceled = planState === 'canceled'
+  const done = planState === 'done'
 
   return (
     <div style={{
@@ -42,7 +36,10 @@ export default function PlanCard({ plan, planState, onConfirm, onCancel }) {
           fontSize: '12px', fontWeight: 700, letterSpacing: '0.05em',
           textTransform: 'uppercase', color: 'var(--text-muted)',
         }}>
-          {running ? 'Running plan' : canceled ? 'Plan canceled' : 'Proposed plan'}
+          {running ? 'Running plan'
+            : done ? 'Plan complete'
+            : canceled ? 'Plan canceled'
+            : 'Proposed plan'}
         </span>
       </div>
 
@@ -59,18 +56,15 @@ export default function PlanCard({ plan, planState, onConfirm, onCancel }) {
       <ol style={{ listStyle: 'none', margin: 0, padding: 0,
                    display: 'flex', flexDirection: 'column', gap: '10px' }}>
         {plan.steps.map((step, i) => {
-          const st = STEP_ICON[step.status || 'pending'] || STEP_ICON.pending
-          const spin = step.status === 'running'
           return (
             <li key={i} style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
               <span style={{
                 flexShrink: 0, width: '18px', textAlign: 'center',
-                color: st.color, fontSize: '13px', fontWeight: 700,
+                color: 'var(--text-muted)', fontSize: '13px', fontWeight: 700,
                 marginTop: '1px',
                 display: 'inline-block',
-                animation: spin ? 'spin 1s linear infinite' : 'none',
               }}>
-                {st.mark}
+                {i + 1}.
               </span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{

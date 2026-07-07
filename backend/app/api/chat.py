@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent import make_plan, run_agent
+from app.agent.graph import session_structure_context
 from app.api.deps import get_session_for_rel_path, get_session_for_user
 from app.core.config import settings
 from app.core.limiter import limiter
@@ -18,7 +19,11 @@ from app.database.db import AsyncSessionLocal, get_db
 from app.database.models import User
 from app.repositories import message_repository, session_repository
 from app.schemas.chat import ChatRequest, MessageOut, SessionOut
-from app.services.storage.file_service import STORAGE_ROOT, list_session_files
+from app.services.storage.file_service import (
+    STORAGE_ROOT,
+    get_session_dir,
+    list_session_files,
+)
 from app.services.key_service import load_user_keys_into_env
 
 router = APIRouter()
@@ -318,7 +323,8 @@ async def chat(
         # PLAN phase — propose a plan first; gate only on multi-tool workflows.
         yield f"data: [SESSION:{session_id}]\n\n"
         yield f'data: {json_lib.dumps({"type": "status", "value": "🧭 Planning…"})}\n\n'
-        plan = await make_plan(messages_for_llm)
+        struct_ctx = session_structure_context(str(get_session_dir(session_id)))
+        plan = await make_plan(messages_for_llm, context=struct_ctx)
         yield f'data: {json_lib.dumps({"type": "status", "value": ""})}\n\n'
 
         if (plan and plan.get("needs_tools")

@@ -14,6 +14,7 @@
 * **Incremental Restructuring:** When executing sweeping architectural changes (e.g., consolidating modules or refactoring services), break the work down into smaller, independently verifiable steps to prevent loose ends.
 * **Post-Change Verification:** Always verify imports, run local tests, and check critical flows (e.g., timezone-aware vs. naive datetime consistency, file storage paths, database connections) after editing files.
 * **Clean Code:** Actively identify and remove dead or deprecated code blocks during refactors to keep the codebase tight and maintainable.
+* **Issue Postmortems:** Every time an issue/bug is solved, add a Markdown explanation file to `docs/issues_solved/`. The filename MUST start with `issue-` followed by a short kebab-case slug (e.g. `issue-c2db-search-not-working.md`) — NOT a date prefix. Each file explains: the **symptom**, the **root cause (why the bug came)**, **how we fixed it**, the **files changed**, **how to verify**, and the **lesson**.
 
 ## 4. Explanation & Reporting Style
 * **Dual Focus:** Treat every session as both a software delivery and a learning session. 

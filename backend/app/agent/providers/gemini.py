@@ -13,6 +13,7 @@ import uuid
 from google import genai
 from google.genai import types
 
+from app.agent.providers._keypool import build_pool, run_with_rotation
 from app.agent.providers.base import LLMProvider, LLMResult, OnText, ToolCall, ToolSpec
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -20,9 +21,12 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 
-def _api_key() -> str | None:
-    """Resolve the Gemini key — per-user env override wins over startup config."""
-    return os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
+def _key_pool() -> list[str]:
+    """Ordered Gemini key pool: per-user BYOK / startup key first, then the
+    operator's rotation pool (``GEMINI_API_KEYS``). Rotated on 429 to multiply
+    the request-metered free-tier quota."""
+    singular = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
+    return build_pool(singular, os.getenv("GEMINI_API_KEYS"))
 
 
 def _to_contents(messages: list[dict]) -> tuple[str, list[types.Content]]:
@@ -93,13 +97,24 @@ class GeminiProvider(LLMProvider):
         tools: list[ToolSpec],
         on_text: OnText,
     ) -> LLMResult:
-        key = _api_key()
-        if not key:
+        pool = _key_pool()
+        if not pool:
             raise RuntimeError(
                 "GEMINI_API_KEY is not set. Add a Gemini key (free at "
                 "https://aistudio.google.com/apikey) or set MODEL_PROVIDER=ollama."
             )
+        return await run_with_rotation(
+            "gemini", pool, on_text,
+            lambda key, ot: self._run_once(key, messages, tools, ot),
+        )
 
+    async def _run_once(
+        self,
+        key: str,
+        messages: list[dict],
+        tools: list[ToolSpec],
+        on_text: OnText,
+    ) -> LLMResult:
         client = genai.Client(api_key=key)
         system_instruction, contents = _to_contents(messages)
 

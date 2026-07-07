@@ -212,26 +212,6 @@ export default function Chat({
     })
   }
 
-  // mark the first matching plan step running / done / error during execution
-  function markStep(msg, toolName, newStatus) {
-    if (!msg.plan) return msg
-    let applied = false
-    const steps = msg.plan.steps.map(s => {
-      if (applied) return s
-      const pending = !s.status || s.status === 'pending'
-      if (newStatus === 'running' && s.tool === toolName && pending) {
-        applied = true
-        return { ...s, status: 'running' }
-      }
-      if (newStatus !== 'running' && s.tool === toolName && s.status === 'running') {
-        applied = true
-        return { ...s, status: newStatus }
-      }
-      return s
-    })
-    return { ...msg, plan: { ...msg.plan, steps } }
-  }
-
   async function sendMessage(overrideText) {
     const text = (overrideText || input).trim()
     if (!text || streaming) return
@@ -369,7 +349,7 @@ export default function Chat({
           if (!mountedRef.current) return
           patchLast(last => ({
             ...last,
-            plan: { ...plan, steps: (plan.steps || []).map(s => ({ ...s, status: 'pending' })) },
+            plan: { ...plan, steps: plan.steps || [] },
             planState: 'proposed',
           }))
         },
@@ -405,7 +385,6 @@ export default function Chat({
       planState: 'running',
       content: '',
       toolCards: [],
-      plan: { ...msg.plan, steps: msg.plan.steps.map(s => ({ ...s, status: 'pending' })) },
     }))
     setStreaming(true)
 
@@ -425,11 +404,8 @@ export default function Chat({
         }))
         onFilesGenerated?.()
       },
-      (toolName) => patchAt(index, m => markStep(m, toolName, 'running')),
-      (toolName, status) => patchAt(index, m => markStep(
-        m, toolName,
-        (status === 'success' || status === 'ok' || status === 'skipped') ? 'done' : 'error',
-      )),
+      () => {},                             // onToolStart — no per-step status UI
+      () => {},                             // onToolEnd  — no per-step status UI
       (statusText) => patchAt(index, m => ({ ...m, statusText: statusText || '' })),
       (service) => { setPendingMessage(''); patchAt(index, m => ({ ...m, needsApiKey: service })) },
       () => onJobDone?.(),

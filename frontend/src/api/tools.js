@@ -43,6 +43,11 @@ export const launchElastic = (sessionId, file, params) =>
 export const launchSqs = (sessionId, file, params) =>
   launch(sessionId, 'sqs', file, params, 'Failed to start SQS')
 
+// Pre-flight for the SQS panel: list the symmetry-distinct sublattices (Sr, Ti,
+// O…) of the active/uploaded structure so the user knows which site to alloy.
+export const fetchSqsSublattices = (sessionId, file, symprec = 0.1) =>
+  launch(sessionId, 'sqs/sublattices', file, { symprec }, 'Failed to detect sublattices')
+
 // ── instant structure tools (Step 3): synchronous, return a tool-card envelope
 //    ({ status, files_written, message }) rather than a queued job. ──
 export const launchMakeSupercell = (sessionId, file, params) =>

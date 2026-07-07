@@ -27,11 +27,14 @@ _ARTIFACT_KIND = {
     "plot_convergence": "plot",
     "elastic_tensor_csv": "data", "stress_csv": "data", "mechanical_json": "data",
     "phonon_plot": "plot", "phonopy_yaml": "data", "band_csv": "data", "dos_csv": "data",
+    "sqs_poscar": "structure", "relaxed_contcar": "structure",
+    "relax_energy_csv": "data",
     "bestsqs_out": "data", "rndstr_in": "data", "sqscell_out": "data",
     "parent_cif": "structure", "sublattices_json": "data",
     "bestcorr_out": "data", "mcsqs_progress_csv": "data",
     "neb_mep": "plot", "neb_path_csv": "data", "neb_traj": "trajectory",
-    "saddle_poscar": "structure",
+    "saddle_poscar": "structure", "neb_path_xyz": "trajectory",
+    "saddle_frequencies": "data", "neb_vasp_zip": "archive",
     "adsorption_csv": "data",
     "convergence_report": "report", "convergence_json": "data",
 }
@@ -143,16 +146,19 @@ def _run(job_id: str, job_type: JobType) -> None:
         elif job_type is JobType.SQS:
             from app.services.simulation.sqs import run_sqs
             result = run_sqs(
-                cif_path=spec["poscar_path"],   # resolved disordered structure file
+                cif_path=spec["poscar_path"],   # resolved structure (ordered or disordered)
                 output_dir=spec["output_dir"],
                 target_comp=params.get("target_comp"),
                 substitutions=params.get("substitutions"),
+                sublattice_comp=params.get("sublattice_comp"),
                 supercell=tuple(params.get("supercell", (2, 2, 2))),
                 cutoff=params.get("cutoff"),
                 n_parallel=params.get("n_parallel", 4),
                 target_objective=params.get("target_objective", -0.99),
                 occ_threshold=params.get("occ_threshold", 0.05),
                 time_budget_s=params.get("time_budget_s", 600),
+                relax=params.get("relax", True),
+                calculator=calc,
                 progress_callback=reporter,
             )
         elif job_type is JobType.NEB:
@@ -161,13 +167,17 @@ def _run(job_id: str, job_type: JobType) -> None:
                 poscar_path=spec["poscar_path"],
                 final_poscar_path=params["final_poscar_path"],
                 output_dir=spec["output_dir"],
-                n_images=params.get("n_images", 7),
+                n_images=params.get("n_images", 8),
                 fmax=params.get("fmax", 0.05),
+                endpoint_fmax=params.get("endpoint_fmax", 0.03),
                 max_steps=params.get("max_steps", 300),
                 spring_k=params.get("spring_k", 1.0),
                 climb=params.get("climb", True),
                 relax_endpoints=params.get("relax_endpoints", True),
                 optimizer=params.get("optimizer", "FIRE"),
+                run_frequencies=params.get("run_frequencies", True),
+                emit_vasp_inputs=spec.get("emit_vasp_inputs", True),
+                migrating_element=params.get("migrating_element"),
                 calculator=calc,
                 progress_callback=reporter,
             )
