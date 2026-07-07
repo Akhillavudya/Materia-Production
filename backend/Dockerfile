@@ -46,16 +46,27 @@ RUN curl -fsSL "$ATAT_URL" -o /tmp/atat.tar.gz \
 
 # Install Python deps FIRST (own layer) so code edits don't re-download everything.
 COPY requirements.txt .
-# CPU-only PyTorch: the Oracle target is CPU-only (ARM). Install the whole torch family
-# (torch + torchvision + torchaudio) together from the CPU wheel index BEFORE the rest.
-# Why all three: mattersim pulls in torchvision, and a torchvision built against a
-# different torch ABI fails at runtime with "operator torchvision::nms does not exist".
-# Installing them together guarantees matching +cpu builds, and means mace-torch/mattersim
-# reuse them instead of pulling ~2.5 GB of unused NVIDIA CUDA libraries.
+# CPU-only PyTorch, installed as a family (torch + torchvision + torchaudio) BEFORE the
+# rest so mace-torch/mattersim reuse them. Why all three together: mattersim pulls in
+# torchvision, and a torchvision built against a different torch ABI fails at runtime with
+# "operator torchvision::nms does not exist" — one shot guarantees a matching set.
+#
+# The wheel source depends on CPU arch (this image builds on amd64 locally AND arm64 on the
+# Oracle A1). The PyTorch CPU wheel index has NO aarch64 wheels, so:
+#   • amd64 → that CPU index (keeps torch off the ~2.5 GB NVIDIA CUDA libs).
+#   • arm64 → the default PyPI index (its linux-aarch64 torch wheels are CPU-only anyway).
 RUN pip install --upgrade pip \
-    && pip install --retries 5 --timeout 120 \
-        --index-url https://download.pytorch.org/whl/cpu \
-        torch torchvision torchaudio \
+    && ARCH="$(uname -m)" \
+    && if [ "$ARCH" = "x86_64" ] || [ "$ARCH" = "amd64" ]; then \
+         echo "[torch] $ARCH → PyTorch CPU wheel index"; \
+         pip install --retries 5 --timeout 120 \
+           --index-url https://download.pytorch.org/whl/cpu \
+           torch torchvision torchaudio; \
+       else \
+         echo "[torch] $ARCH → default PyPI (aarch64 CPU wheels)"; \
+         pip install --retries 5 --timeout 120 \
+           torch torchvision torchaudio; \
+       fi \
     && pip install --retries 5 --timeout 120 \
         --use-deprecated=legacy-resolver -r requirements.txt
 
