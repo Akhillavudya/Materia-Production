@@ -4,9 +4,40 @@ Electron shell that runs the **full 23-tool** Materia backend — including the 
 ML-potential simulations — **on the user's own CPU/GPU**. It wraps the existing React
 SPA (no rewrite) and spawns the existing FastAPI backend (PyInstaller-frozen) on a
 local port in `JOB_BACKEND=inline` mode (no Celery/Redis). The chat "brain" stays
-online (BYOK Gemini/Groq); only the simulations run locally.
+online (BYOK Gemini) or offline (local Ollama); only the simulations run locally.
 
 See `docs/deployment_part_c/PART_C_DESKTOP_PLAN.md` for the full plan.
+
+## Offline chat brain (Ollama) — optional, one-time setup
+
+The **simulations** run locally out of the box. The **chat brain** defaults to hosted
+Gemini (bring your own free key in Settings). If you also want the chat to work with
+**no internet and no API key**, install the free **Ollama** runtime and pull the model
+the agent falls back to:
+
+```bash
+# 1) install the Ollama runtime (see https://ollama.com/download), then:
+ollama pull qwen3:14b        # ~9 GB — the offline agent model (native tool-calling)
+```
+
+That's it. With Ollama running and `qwen3:14b` pulled, the provider chain
+(`Gemini → Ollama`, see `backend/app/agent/llm.py`) transparently falls back to the
+local model on a quota/429/network error, and works fully offline when you have no
+Gemini key at all. Nothing to configure — the backend auto-detects the Ollama server
+on `http://localhost:11434`.
+
+You don't need the terminal: **Sidebar → Models** has an *Offline chat brain* card that
+detects whether Ollama is installed and gives you a one-click **Download** button (it
+runs the `pull` for you with a progress bar). If Ollama isn't installed yet, the card
+shows the install step above.
+
+> **Why a manual step?** Ollama is a separate ~9 GB runtime + model; bundling it would
+> bloat every installer even for the majority who use hosted Gemini. It's opt-in.
+>
+> **Quality:** benchmarked at **92% tool-selection** (vs hosted Gemini's 100%) on the
+> 39-prompt T4 suite — a strong offline fallback, close to the default (see
+> `docs/validation_results/T4_agent_reliability_ollama.md`). Prefer a Gemini key when
+> online; the local model is there for offline / no-key use.
 
 ## Status — C1 spike: DONE & verified (Linux)
 - Frozen backend boots standalone (no Python installed) → `/health`, `/ready` ok.
@@ -52,7 +83,7 @@ outputs), and `secrets.json` (locally-generated JWT + Fernet keys).
 - **First-run model download:** a screen offers to fetch the ML checkpoints into
   `userData/models` (recommended set or all), with live progress; backed by
   `/api/models` (gated to the desktop edition). See `docs/deployment_part_c/C2_EXPLAINED.md`.
-- **BYOK LLM:** the existing SettingsPanel key flow (Gemini→Groq) works in the
+- **BYOK LLM:** the existing SettingsPanel key flow (Gemini) works in the
   desktop window; fixed an `auth.js` bug that broke login/key-save under `file://`.
 - **SQS/ATAT:** deferred — SQS degrades gracefully when ATAT isn't on PATH.
 

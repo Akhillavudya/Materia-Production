@@ -300,16 +300,14 @@ async def chat(
     # 3. streaming generator
     async def token_generator():
         # BYOK gate: in a hosted deployment the user must supply their own LLM key.
-        if settings.is_production and not (
-            os.getenv("GROQ_API_KEY") or os.getenv("GEMINI_API_KEY")
-        ):
+        if settings.is_production and not os.getenv("GEMINI_API_KEY"):
             nudge = (
-                "I don't have an LLM API key yet. Add your free Groq or Gemini key in "
+                "I don't have an LLM API key yet. Add your free Gemini key in "
                 "Settings (or below) to start chatting."
             )
             yield f"data: [SESSION:{session_id}]\n\n"
             yield f'data: {json_lib.dumps({"type": "token", "value": nudge})}\n\n'
-            yield "data: [NEED_API_KEY:groq]\n\n"
+            yield "data: [NEED_API_KEY:gemini]\n\n"
             yield "data: [DONE]\n\n"
             return
 

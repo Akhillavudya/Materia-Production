@@ -9,7 +9,7 @@ plain answer.
 Streaming SSE contract (unchanged — consumed by `api/chat.py` and the frontend):
     data: {"type":"status","value":...}   data: {"type":"token","value":...}
     data: [TOOL_START:<tool>]             data: [TOOL_END:<tool>:<status>]
-    data: [FILES:{...}]                   data: [JOB:{...}]
+    data: [FILES:{...}]                   (job_id, when present, rides inside FILES)
     data: [PLAN:{...}]                    (multi-tool confirmation gate; planner.py)
     data: [DONE]                          data: [SESSION:<id>]
 """
@@ -442,15 +442,10 @@ async def _execute_tool(
         # only the final deliverable at the end (so intermediate structures are
         # hidden). The payload is still recorded in step_results either way.
         if emit_files:
+            # job_id / type already ride inside the FILES payload (see the copy
+            # loop above), which is what the frontend and api/chat.py consume; a
+            # separate [JOB:] event had no consumer, so it was removed.
             await queue.put(f"data: [FILES:{json.dumps(files_payload)}]\n\n")
-
-        if isinstance(result, dict) and result.get("job_id"):
-            job_event = {
-                "job_id": result["job_id"],
-                "type": result.get("type"),
-                "status": result.get("status", "queued"),
-            }
-            await queue.put(f"data: [JOB:{json.dumps(job_event)}]\n\n")
 
         step_results.append(files_payload)
         return result if isinstance(result, dict) else {"status": status, "message": str(result)}
@@ -622,9 +617,9 @@ def _friendly_error(e: Exception) -> str:
     if any(s in text for s in ("429", "quota", "rate limit", "resource_exhausted",
                                "too many requests", "unavailable")):
         return ("⚠ The language model is busy or rate-limited right now. Wait a few "
-                "seconds and try again. Tip: add a **Gemini** key in ⚙️ Settings as a "
-                "backup provider so requests fall back automatically when Groq is "
-                "rate-limited.")
+                "seconds and try again. Tip: add one or more **Gemini** keys in "
+                "⚙️ Settings — the agent rotates through them automatically for more "
+                "free-tier headroom.")
     return "⚠ Something went wrong while generating a response. Please try again."
 
 

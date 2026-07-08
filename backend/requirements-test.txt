@@ -37,7 +37,6 @@ python-jose[cryptography]
 cryptography
 
 # LLM/agent SDKs (imported at app import time; not called in tests)
-groq
 google-genai
 ollama
 

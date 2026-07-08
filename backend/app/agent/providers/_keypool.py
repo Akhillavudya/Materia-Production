@@ -1,11 +1,13 @@
-"""Shared multi-key rotation for the hosted providers (Gemini, Groq).
+"""Shared multi-key rotation for the hosted Gemini provider.
 
-Free tiers are quota-capped per key (Gemini: requests/day; Groq: tokens/day). An
-operator can supply several free keys via ``GEMINI_API_KEYS`` / ``GROQ_API_KEYS``
-(comma-separated) to multiply the daily budget. Instead of falling straight
-through to the next *provider* on a 429, a provider first rotates to the next
-*key* in its own pool. Only when every key is exhausted does the request drop to
-the next provider (see ``agent/llm.py``).
+Gemini's free tier is quota-capped per key (requests/day). An operator can supply
+several free keys via ``GEMINI_API_KEYS`` (comma-separated) to multiply the daily
+budget. Instead of falling straight through to the next *provider* (Ollama) on a
+429, the provider first rotates to the next *key* in its own pool. Only when every
+key is exhausted does the request drop to the next provider (see ``agent/llm.py``).
+
+This is the real resilience layer on web, where Gemini is the sole provider (there
+is no Ollama server on the hosted deployment).
 
 A per-pool round-robin cursor remembers the last good key, so an exhausted key is
 not retried first on every subsequent request.

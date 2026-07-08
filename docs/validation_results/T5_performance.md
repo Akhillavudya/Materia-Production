@@ -2,7 +2,7 @@
 
 **Tier:** T5 (supporting) · **Date:** 2026-06-25 · **Plan:** `docs/VALIDATION_PLAN.md` §6
 **Harness:** `backend/scripts/validation/t5_performance.py`
-**Device:** CUDA · **Metric:** wall-time per energy+forces evaluation (the per-step cost of every relax / MD / NEB job).
+**Device:** NVIDIA RTX A4000 (16 GB, CUDA, driver 595.71.05) · **Metric:** wall-time per energy+forces evaluation (the per-step cost of every relax / MD / NEB job).
 
 Each model is timed on a geometric sweep of Si supercells (8 → 1024 atoms). Per measurement: a few warm-up calls (excluded), then several forced recomputes on a fixed geometry, CUDA-synchronised. The result cache is bypassed so every call is real work.
 

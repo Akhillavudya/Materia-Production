@@ -316,7 +316,7 @@
 /* ── feature cards ── */
 .lp-cards {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 18px;
 }
 @media (max-width: 940px) { .lp-cards { grid-template-columns: repeat(2, 1fr); } }

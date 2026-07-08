@@ -19,7 +19,6 @@ from app.repositories import api_key_repository
 
 KEY_ENV_MAP = {
     "mp": "MP_API_KEY",
-    "groq": "GROQ_API_KEY",
     "gemini": "GEMINI_API_KEY",
     "openai": "OPENAI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",

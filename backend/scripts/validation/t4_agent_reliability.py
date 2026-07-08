@@ -65,7 +65,12 @@ def build_provider(name: str):
 def load_keys(name: str) -> list[str]:
     """Keys for a provider: GROQ_API_KEYS / GEMINI_API_KEYS (comma list) ∪ the
     single GROQ_API_KEY / GEMINI_API_KEY. De-duplicated, order preserved, so we
-    can rotate across several free accounts as each hits its rate limit."""
+    can rotate across several free accounts as each hits its rate limit.
+
+    Ollama is local and needs no key, so we hand back a single dummy entry — the
+    per-case rotation loop then runs exactly once and never touches os.environ."""
+    if name == "ollama":
+        return ["local"]
     plural = os.getenv(f"{name.upper()}_API_KEYS", "")
     single = os.getenv(KEY_ENV[name], "")
     keys, seen = [], set()
@@ -139,7 +144,7 @@ async def run_case(provider, name: str, keys: list[str], state: dict,
     async def _noop(_delta: str) -> None:  # discard streamed text
         return None
 
-    key_var = KEY_ENV[name]
+    key_var = KEY_ENV.get(name)  # None for keyless providers (ollama)
     t0 = time.time()
     err = None
     first_tool: str | None = None
@@ -152,7 +157,8 @@ async def run_case(provider, name: str, keys: list[str], state: dict,
     # is a REAL result — record it, don't rotate. If every key is rate-limited for
     # this case, the whole provider run is out of quota → raise to stop early.
     for _ in range(len(keys)):
-        os.environ[key_var] = keys[state["idx"]]
+        if key_var:
+            os.environ[key_var] = keys[state["idx"]]
         try:
             result = await provider.run(messages, tool_specs, _noop)
             all_tools = [tc.name for tc in result.tool_calls]
@@ -244,12 +250,16 @@ def _agg(rows: list[dict], key="tool_ok") -> tuple[int, int]:
     return ok, len(rows)
 
 
-def write_outputs(rows: list[dict], providers: list[str], out_dir: Path) -> None:
+def write_outputs(rows: list[dict], providers: list[str], out_dir: Path,
+                  tag: str = "") -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     keys = ["provider", "id", "category", "prompt", "expected_tools",
             "first_tool", "all_tools", "tool_ok", "arg_ok", "arg_detail",
             "success", "latency_s", "error"]
-    csv_path = out_dir / "T4_agent_reliability.csv"
+    # A tag suffixes the filenames (e.g. "_ollama") so a supplementary run never
+    # overwrites the canonical Gemini T4 report.
+    stem = f"T4_agent_reliability{('_' + tag) if tag else ''}"
+    csv_path = out_dir / f"{stem}.csv"
     with open(csv_path, "w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=keys, extrasaction="ignore")
         w.writeheader()
@@ -261,8 +271,8 @@ def write_outputs(rows: list[dict], providers: list[str], out_dir: Path) -> None
         f"**Date:** {date.today().isoformat()} · **Plan:** `docs/VALIDATION_PLAN.md` §5",
         "**Harness:** `backend/scripts/validation/t4_agent_reliability.py` · "
         "**Suite:** `backend/scripts/validation/t4_prompt_suite.py`",
-        f"**Providers:** {', '.join(providers)} (free hosted stack; Ollama is the "
-        "user-side offline option, not benchmarked) · "
+        f"**Providers:** {', '.join(providers)} (gemini = hosted default; ollama "
+        "= desktop-offline fallback) · "
         f"**Cases:** {len(rows) // max(len(providers), 1)}",
         "",
         "Each case = one agent turn with the production `SYSTEM_PROMPT` + 23 tool "
@@ -328,7 +338,7 @@ def write_outputs(rows: list[dict], providers: list[str], out_dir: Path) -> None
            "correctly calls no tool (asks/clarifies/answers directly). Argument "
            "matching is case-insensitive substring / numeric-equal.", ""]
 
-    md_path = out_dir / "T4_agent_reliability.md"
+    md_path = out_dir / f"{stem}.md"
     md_path.write_text("\n".join(md) + "\n")
     print(f"\nwrote {csv_path}\nwrote {md_path}")
     for p in providers:
@@ -341,10 +351,13 @@ def write_outputs(rows: list[dict], providers: list[str], out_dir: Path) -> None
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--providers", default="groq,gemini",
-                    help="comma list: groq,gemini (ollama is user-side, not benchmarked)")
+    ap.add_argument("--providers", default="gemini",
+                    help="comma list: gemini,ollama (groq removed 2026-07-07)")
     ap.add_argument("--ids", default="", help="comma list of case ids (pilot subset)")
     ap.add_argument("--out", default=str(_BACKEND.parent / "docs" / "validation_results"))
+    ap.add_argument("--tag", default="",
+                    help="filename suffix so a run doesn't overwrite the main "
+                         "report, e.g. --tag ollama → T4_agent_reliability_ollama.md")
     args = ap.parse_args()
 
     providers = [p.strip() for p in args.providers.split(",") if p.strip()]
@@ -360,7 +373,7 @@ def main() -> None:
     for name in providers:
         all_rows += asyncio.run(run_provider(name, cases))
 
-    write_outputs(all_rows, providers, Path(args.out))
+    write_outputs(all_rows, providers, Path(args.out), tag=args.tag)
 
 
 if __name__ == "__main__":

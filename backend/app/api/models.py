@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from app.core.config import settings
 from app.core.security import get_current_user
 from app.database.models import User
-from app.services import model_manager
+from app.services import model_manager, ollama_manager
 
 router = APIRouter(prefix="/models", tags=["models"])
 
@@ -52,3 +52,23 @@ async def download_models(
         raise HTTPException(status_code=400, detail="No known models in request.")
     queued = model_manager.start_downloads(names)
     return {"queued": queued, "requested": names}
+
+
+# ── Offline chat brain (Ollama) ───────────────────────────────────────────────
+# Parallel to the checkpoint routes above, but for the local LLM the agent falls
+# back to offline. It lives in a separately-installed Ollama server, so instead of
+# streaming a file we report server/model state and drive `ollama pull`.
+
+
+@router.get("/llm")
+async def get_llm(current_user: User = Depends(get_current_user)):
+    """Offline-brain state: Ollama server reachable, model present, pull progress."""
+    _require_local_models()
+    return ollama_manager.status()
+
+
+@router.post("/llm/pull")
+async def pull_llm(current_user: User = Depends(get_current_user)):
+    """Start `ollama pull <model>` in the background; returns the resulting status."""
+    _require_local_models()
+    return ollama_manager.start_pull()

@@ -25,16 +25,6 @@ const PROVIDERS = [
     info: 'Free academic database of computed materials. Needed for search tools.',
     steps: ['Sign in at materialsproject.org', 'Open the API page', 'Copy your API key'],
   },
-  {
-    id: 'groq',
-    name: 'Groq',
-    level: 'optional',
-    purpose: 'A backup chat model — used automatically if Gemini is rate-limited.',
-    unlocks: 'Fallback AI chat when Gemini is unavailable.',
-    url: 'https://console.groq.com/keys',
-    info: 'Free, fast hosted LLM (Llama 3.3). Optional resilience, not required.',
-    steps: ['Sign in at console.groq.com', 'Open “API Keys”', 'Create key → copy it'],
-  },
 ]
 
 const LEVEL = {
@@ -92,7 +82,6 @@ export default function SettingsPanel({ onClose }) {
             <ol style={s.onboardList}>
               <li>Add a <strong>Gemini</strong> key for AI chat.</li>
               <li>Add a <strong>Materials Project</strong> key for materials search.</li>
-              <li>Optionally add a <strong>Groq</strong> key as a backup model.</li>
             </ol>
           </div>
 
@@ -141,8 +130,8 @@ function ProviderCard({ p, row, loading, onChanged }) {
   const keys = row?.keys || []
   const count = keys.length
   const isSet = count > 0
-  // Only the LLM providers pool + rotate keys; MP just uses one.
-  const pooled = p.id === 'gemini' || p.id === 'groq'
+  // Only the LLM provider pools + rotates keys; MP just uses one.
+  const pooled = p.id === 'gemini'
 
   async function handleAdd() {
     if (!value.trim() || busy) return

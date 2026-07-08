@@ -142,25 +142,21 @@ class Settings(BaseModel):
 
     # ── LLM provider ─────────────────────────────────────────────────────────
     # The agent uses native function-calling (redesign §15). `model_provider`
-    # selects the backend: "gemini" (hosted default), "groq", or "ollama"
-    # (offline/local). When unset it auto-resolves in order of available keys:
-    # gemini → groq → ollama. Gemini is primary because its free tier is
-    # request-metered (not token-metered), so the ~8k-token tool schema sent on
-    # every call doesn't drain its quota the way it drains Groq's daily token cap;
-    # T4 also showed gemini-2.5-flash at 100% tool-selection vs Groq's judgment
-    # misses. Whichever is primary falls through the others at runtime
-    # (see agent/llm.py) on quota/429/connection errors.
+    # selects the backend: "gemini" (hosted default) or "ollama" (offline/local,
+    # desktop only). When unset it auto-resolves in order of available keys:
+    # gemini → ollama. Gemini is the sole hosted provider because its free tier
+    # is request-metered (not token-metered), so the ~8k-token tool schema sent
+    # on every call doesn't drain its quota; T4 showed gemini-2.5-flash at 100%
+    # tool-selection. On web this is effectively Gemini-only; on desktop Ollama
+    # is the offline fallback (see agent/llm.py) on quota/429/connection errors.
     model_provider: str | None = None
-    # Groq (free hosted tier — OpenAI-compatible, native tool calling, fast)
-    groq_api_key: str | None = None
-    groq_model: str = "llama-3.3-70b-versatile"
     # Gemini (Google AI Studio free tier — native function calling)
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-2.5-flash"
-    # Optional extra free keys for quota headroom: GEMINI_API_KEYS / GROQ_API_KEYS
-    # (comma-separated). Read directly from the environment by the providers via
+    # Optional extra free keys for quota headroom: GEMINI_API_KEYS (comma-
+    # separated). Read directly from the environment by the provider via
     # agent/providers/_keypool.py, which rotates to the next key on a 429 before
-    # the request falls through to the next provider.
+    # the request falls through to Ollama.
     # Ollama (local fallback; qwen3 supports native tools)
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "qwen3:14b"
@@ -172,8 +168,6 @@ class Settings(BaseModel):
             return self.model_provider.lower().strip()
         if self.gemini_api_key or os.getenv("GEMINI_API_KEY"):
             return "gemini"
-        if self.groq_api_key or os.getenv("GROQ_API_KEY"):
-            return "groq"
         return "ollama"
 
     @property
@@ -306,8 +300,6 @@ def get_settings() -> Settings:
         pmg_vasp_psp_dir=os.getenv("PMG_VASP_PSP_DIR"),
         pmg_vasp_functional=os.getenv("PMG_VASP_FUNCTIONAL", "PBE_54"),
         model_provider=os.getenv("MODEL_PROVIDER"),
-        groq_api_key=os.getenv("GROQ_API_KEY"),
-        groq_model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
         gemini_api_key=os.getenv("GEMINI_API_KEY"),
         gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
         ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),

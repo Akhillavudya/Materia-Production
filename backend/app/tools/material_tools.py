@@ -1473,14 +1473,14 @@ def run_md_simulation(
     log_interval:     int           = 10,
     emit_vasp_inputs: bool          = True,
 ) -> dict:
-    """Queue an ASE Molecular Dynamics (NVT/NPT) job for a session structure.
+    """Queue an ASE Molecular Dynamics (NVT/NPT/NVE) job for a session structure.
 
     Long-running, so this enqueues a job and returns a ``job_id`` immediately;
     progress/results are tracked via ``/api/jobs`` (redesign §11).
     """
     ensemble = ensemble.lower().strip()
-    if ensemble not in ("nvt", "npt"):
-        return {"status": "error", "message": f"Invalid ensemble '{ensemble}'. Use: nvt | npt"}
+    if ensemble not in ("nvt", "npt", "nve"):
+        return {"status": "error", "message": f"Invalid ensemble '{ensemble}'. Use: nvt | npt | nve"}
 
     thermostat = thermostat.lower().strip() or ("langevin" if ensemble == "nvt" else "berendsen")
 

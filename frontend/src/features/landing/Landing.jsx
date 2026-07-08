@@ -2,10 +2,12 @@ import './Landing.css'
 import Logo, { LogoMark } from '../../components/Logo'
 
 const FEATURES = [
-  { icon: '🔍', title: 'Search materials', body: 'Describe the properties you need and Materia searches global databases — Materials Project, C2DB, OQMD — returning ranked candidates instantly.' },
-  { icon: '⚙️', title: 'Generate inputs', body: 'Turn a structure into ready-to-run VASP files — POSCAR, INCAR, KPOINTS, POTCAR — auto-built from a single sentence. No hand-editing.' },
-  { icon: '🔬', title: 'Optimize structures', body: 'Relax a crystal to its most stable atomic arrangement as a background job, while you keep working in the chat.' },
-  { icon: '⚡', title: 'Run dynamics', body: 'Launch molecular-dynamics simulations to watch how atoms move and behave over time — a virtual experiment, delivered as results.' },
+  { icon: '🔍', title: 'Search materials', body: 'Find candidates across Materials Project, C2DB and OQMD by formula, elements, band gap or dimensionality — ranked and returned in seconds.' },
+  { icon: '🧊', title: 'Build & edit crystals', body: 'Cut slabs, build supercells, add vacancies, substitutions, interstitials and adsorbates, or generate random-alloy SQS — all from a sentence.' },
+  { icon: '⚙️', title: 'Generate VASP inputs', body: 'Turn any structure into a ready-to-run input set — POSCAR, INCAR, KPOINTS, POTCAR — built automatically, with no hand-editing.' },
+  { icon: '🔬', title: 'Optimize structures', body: 'Relax a crystal to its most stable arrangement with machine-learning potentials, as a background job while you keep chatting.' },
+  { icon: '⚡', title: 'Run molecular dynamics', body: 'Launch MD simulations to watch how atoms move and behave over time — a virtual experiment, delivered as results.' },
+  { icon: '📊', title: 'Compute properties', body: 'Get elastic moduli, phonon spectra and ion-migration (NEB) barriers — advanced analyses that once took days, now on demand.' },
 ]
 
 const STEPS = [
@@ -73,10 +75,10 @@ export default function Landing({ onGetStarted, onLogin }) {
             </div>
             <div className="lp-mock-body">
               <div className="lp-bubble lp-bubble-user">
-                Find me a 2D material with high electron mobility for transistors.
+                Find a 2D semiconductor with a band gap between 1 and 2 eV.
               </div>
               <div className="lp-bubble lp-bubble-ai">
-                Found <b>3 candidates</b> in C2DB. Top match: <b>MoS₂</b> — mobility ≈ 200 cm²/V·s, direct gap 1.8 eV.
+                Found <b>3 candidates</b> in C2DB. Top match: <b>MoS₂</b> — 2D hexagonal, direct band gap 1.8 eV.
                 <div className="lp-chip-row">
                   <span className="lp-chip">View structure</span>
                   <span className="lp-chip">Generate VASP inputs</span>
@@ -109,7 +111,7 @@ export default function Landing({ onGetStarted, onLogin }) {
           <div className="lp-eyebrow">Capabilities</div>
           <h2 className="lp-h2">Everything a computational lab does. In one conversation.</h2>
           <p className="lp-lede">
-            Four powerful tools, orchestrated by an AI agent that decides what to run and when — so you focus on the science, not the software.
+            A full suite of materials tools, orchestrated by an AI agent that decides what to run and when — so you focus on the science, not the software.
           </p>
           <div className="lp-cards">
             {FEATURES.map(f => (

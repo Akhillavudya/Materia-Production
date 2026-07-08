@@ -45,6 +45,7 @@ generated/
 /pre_trained_models/
 
 # ── Private / pre-publication (keep local; repo goes public after the paper) ──
+paper/
 docs/paper/
 docs/extract.md
 

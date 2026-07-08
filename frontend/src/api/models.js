@@ -27,3 +27,19 @@ export async function downloadModels(selection = 'recommended') {
   if (!res.ok) throw new Error(await readError(res, 'Could not start download'))
   return res.json()
 }
+
+// Offline chat brain (Ollama). Unlike the checkpoints above it lives in a
+// separately-installed Ollama server, so the shape differs.
+// -> { model, server, present, status, downloaded, total, phase, error }
+export async function getLlm() {
+  const res = await authRequest('/models/llm', { method: 'GET' })
+  if (!res.ok) throw new Error(await readError(res, 'Could not load offline model'))
+  return res.json()
+}
+
+// Start `ollama pull <model>` in the background. -> status + { queued, reason }
+export async function pullLlm() {
+  const res = await authRequest('/models/llm/pull', { method: 'POST' })
+  if (!res.ok) throw new Error(await readError(res, 'Could not start model download'))
+  return res.json()
+}

@@ -58,7 +58,6 @@ COLLECT_ALL = [
     "celery",
     "kombu",
     "google.genai",
-    "groq",
 ]
 
 # Packages that read their own version via importlib.metadata at runtime — without
@@ -73,7 +72,6 @@ COPY_METADATA = [
     "ase",
     "tqdm",
     "google-genai",
-    "groq",
 ]
 
 # Dev/observability packages that are NOT used by Materia but get auto-discovered

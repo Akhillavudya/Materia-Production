@@ -1,7 +1,7 @@
 """BYOK key encryption at rest (Step 1) — round-trip correctness (Step 9).
 
 When a Fernet key is configured, a stored API key must be ciphertext on disk and
-decrypt back to the exact original. This is what keeps students' pasted Groq/Gemini
+decrypt back to the exact original. This is what keeps students' pasted Gemini
 keys out of the database in the clear.
 """
 

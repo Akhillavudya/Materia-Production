@@ -215,8 +215,8 @@ export default function AuthScreen({ onAuthenticated, initialError = null, onBac
             type="password"
             value={password}
             onChange={e => setPassword(e.target.value)}
-            placeholder={isSignup ? 'At least 12 characters' : 'Your password'}
-            minLength={isSignup ? 12 : 1}
+            placeholder={isSignup ? 'At least 8 characters' : 'Your password'}
+            minLength={isSignup ? 8 : 1}
             required
           />
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { listModels, downloadModels } from '../../api/models'
+import { listModels, downloadModels, getLlm, pullLlm } from '../../api/models'
 import { getSystem } from '../../api/system'
 
 // First-run (and re-openable) screen for the desktop app: download the ML-potential
@@ -115,6 +115,8 @@ export default function ModelSetup({ onClose }) {
             </button>
           )}
 
+          <OfflineBrain />
+
           {error && <div style={s.errMsg}>⚠ {error}</div>}
         </div>
 
@@ -164,6 +166,108 @@ function DeviceBadge({ sys }) {
       <div style={s.devText}>
         <span style={s.devTitle}>{title}</span>
         <span style={s.devDetail}>{detail}</span>
+      </div>
+    </div>
+  )
+}
+
+// The offline chat brain (Ollama) — optional, separate from the simulation
+// checkpoints. It lets the AI chat run with no internet and no API key. Because
+// it lives in a separately-installed Ollama server, this card has an extra state
+// the checkpoint rows don't: "Ollama isn't installed yet" (with instructions).
+function OfflineBrain() {
+  const [llm, setLlm] = useState(null)
+  const [err, setErr] = useState(null)
+  const pollRef = useRef(null)
+
+  const refresh = useCallback(async () => {
+    try {
+      const d = await getLlm()
+      setLlm(d)
+      setErr(null)
+      return d
+    } catch (e) {
+      setErr(e.message || 'Could not load offline model')
+      return null
+    }
+  }, [])
+
+  useEffect(() => { refresh() }, [refresh])
+
+  // Poll while the pull is running; stop once it settles.
+  useEffect(() => {
+    const downloading = llm && llm.status === 'downloading'
+    if (downloading && !pollRef.current) {
+      pollRef.current = setInterval(refresh, 1500)
+    } else if (!downloading && pollRef.current) {
+      clearInterval(pollRef.current); pollRef.current = null
+    }
+    return () => {
+      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
+    }
+  }, [llm, refresh])
+
+  async function start() {
+    try { await pullLlm(); await refresh() }
+    catch (e) { setErr(e.message || 'Could not start download') }
+  }
+
+  if (!llm) return null
+
+  const pct = llm.total ? Math.round((llm.downloaded / llm.total) * 100) : null
+  const dlMB = llm.downloaded ? (llm.downloaded / 1e6).toFixed(0) : 0
+
+  return (
+    <div style={s.brainCard}>
+      <div style={s.brainHead}>
+        <div style={s.rowMain}>
+          <span style={s.modelName}>Offline chat brain</span>
+          <span style={s.typePill}>Ollama · {llm.model}</span>
+        </div>
+        <div style={s.rowSide}>
+          {llm.present ? (
+            <span style={s.okBadge}>✓ Installed</span>
+          ) : llm.status === 'downloading' ? (
+            <div style={s.progWrap}>
+              <div style={s.progBar}>
+                <div style={{ ...s.progFill, width: pct != null ? `${pct}%` : '30%' }} />
+              </div>
+              <span style={s.progText}>{pct != null ? `${pct}%` : `${dlMB} MB`}</span>
+            </div>
+          ) : llm.server ? (
+            <button style={s.smallBtn} onClick={start}>
+              {llm.status === 'error' ? 'Retry' : 'Download (~9 GB)'}
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      <div style={s.brainBody}>
+        {!llm.server ? (
+          <>
+            <div style={s.brainMuted}>
+              Optional. Lets the AI chat work with <strong>no internet and no API key</strong>.
+              It needs the free <strong>Ollama</strong> runtime, which isn’t installed yet:
+            </div>
+            <ol style={s.steps}>
+              <li>Install Ollama from <span style={s.code}>ollama.com/download</span> and open it.</li>
+              <li>Reopen this window — a <em>Download</em> button will appear here to fetch the model
+                  (or run <span style={s.code}>ollama pull {llm.model}</span> yourself).</li>
+            </ol>
+          </>
+        ) : llm.status === 'error' ? (
+          <div style={s.brainErr} title={llm.error}>Download failed: {llm.error || 'unknown error'}</div>
+        ) : llm.status === 'downloading' ? (
+          <div style={s.brainMuted}>{llm.phase || 'Downloading'}… you can keep this open or continue.</div>
+        ) : llm.present ? (
+          <div style={s.brainMuted}>Ready — the chat falls back here automatically when offline.</div>
+        ) : (
+          <div style={s.brainMuted}>
+            Ollama is running. Download the model (~9 GB) to enable offline chat, or run
+            <span style={s.code}> ollama pull {llm.model}</span>.
+          </div>
+        )}
+        {err && <div style={s.brainErr}>⚠ {err}</div>}
       </div>
     </div>
   )
@@ -273,6 +377,21 @@ const s = {
   },
   rowSide: { flexShrink: 0 },
   okBadge: { fontSize: '12px', fontWeight: 600, color: 'var(--status-ok-fg)' },
+
+  brainCard: {
+    display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px',
+    border: '1px dashed var(--border)', borderRadius: 'var(--radius-md)', padding: '12px 14px',
+  },
+  brainHead: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' },
+  brainBody: { display: 'flex', flexDirection: 'column', gap: '6px' },
+  brainMuted: { fontSize: '11.5px', color: 'var(--text-secondary)', lineHeight: 1.5 },
+  brainErr: { fontSize: '11.5px', color: 'var(--danger-fg)', lineHeight: 1.5 },
+  steps: { margin: '2px 0 0', paddingLeft: '18px', fontSize: '11.5px', color: 'var(--text-secondary)', lineHeight: 1.6 },
+  code: {
+    fontFamily: 'var(--font-mono, monospace)', fontSize: '11px', padding: '1px 5px',
+    borderRadius: '4px', background: 'var(--hover-bg)', border: '1px solid var(--border)',
+    color: 'var(--text-primary)', whiteSpace: 'nowrap',
+  },
 
   progWrap: { display: 'flex', alignItems: 'center', gap: '8px', minWidth: '160px' },
   progBar: { flex: 1, height: '6px', background: 'var(--hover-bg)', borderRadius: '4px', overflow: 'hidden' },

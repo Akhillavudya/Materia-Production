@@ -45,9 +45,15 @@ def test_disabled_blocks_job(monkeypatch):
 
 
 def test_enabled_passes_the_gate(monkeypatch):
-    # With the gate open, _enqueue_job proceeds past the heavy check. We don't run
-    # a real worker here, so success means it does NOT return the gate message
-    # (it moves on to the quota check / real enqueue path).
+    # With the gate open, _enqueue_job proceeds past the heavy check. The gate is
+    # the unit under test, so we stub the downstream DB/queue calls (quota lookup,
+    # row insert, dispatch) — otherwise the test would need a migrated `jobs` table
+    # and a live Celery broker. Success means it moves on to the real enqueue path
+    # and returns the "queued" envelope (never the desktop gate message).
     monkeypatch.setattr(material_tools.settings, "enable_heavy_tools", True)
+    monkeypatch.setattr(material_tools.store, "count_active_for_user", lambda user_id: 0)
+    monkeypatch.setattr(material_tools.store, "create_job", lambda **kwargs: None)
+    monkeypatch.setattr(material_tools, "enqueue", lambda *args, **kwargs: None)
     result = _attempt_job()
+    assert result["status"] == "queued"                     # gate open → enqueue path
     assert "desktop" not in result.get("message", "").lower()

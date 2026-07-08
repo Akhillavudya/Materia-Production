@@ -1,16 +1,18 @@
 """LLM provider factory for the Materia agent.
 
-`agent/llm.py` is the single seam behind which the hosted default (Groq) and the
-other backends (Gemini, local Ollama) live. The agent in `graph.py` talks only to
-the abstract `LLMProvider`, so swapping backends is a config flip
-(`MODEL_PROVIDER=groq|gemini|ollama`) with no code change. This replaces the old
+`agent/llm.py` is the single seam behind which the hosted default (Gemini) and the
+local Ollama backend live. The agent in `graph.py` talks only to the abstract
+`LLMProvider`, so swapping backends is a config flip
+(`MODEL_PROVIDER=gemini|ollama`) with no code change. This replaces the old
 regex `TOOL_CALL:`/JSON-from-prose path entirely (redesign §15).
 
 On top of that, when the resolved provider has a configured fallback chain
-(Groq → Gemini → Ollama), `get_provider()` returns a `FallbackProvider`: if a
-backend errors at request time — quota/429, network, missing key — or returns an
-empty turn, the same turn is transparently retried down the chain so a hosted
-outage or rate limit degrades gracefully instead of failing the request.
+(Gemini → Ollama), `get_provider()` returns a `FallbackProvider`: if a backend
+errors at request time — quota/429, network, missing key — or returns an empty
+turn, the same turn is transparently retried down the chain so a hosted outage
+or rate limit degrades gracefully instead of failing the request. (Ollama only
+runs on desktop; on web there is no Ollama server, so Gemini is effectively the
+sole provider, backed by multi-key rotation in `_keypool.py`.)
 """
 
 from __future__ import annotations
@@ -25,8 +27,7 @@ logger = get_logger(__name__)
 
 # Primary provider → ordered fallback chain tried (in order) when it fails.
 _FALLBACK_CHAIN: dict[str, list[str]] = {
-    "gemini": ["groq", "ollama"],
-    "groq": ["gemini", "ollama"],
+    "gemini": ["ollama"],
 }
 
 # Text streamed before this many characters is held back so that a provider
@@ -37,9 +38,6 @@ _COMMIT_THRESHOLD = 24
 
 
 def _build_provider(name: str) -> LLMProvider:
-    if name == "groq":
-        from app.agent.providers.groq import GroqProvider
-        return GroqProvider()
     if name == "gemini":
         from app.agent.providers.gemini import GeminiProvider
         return GeminiProvider()
@@ -47,7 +45,7 @@ def _build_provider(name: str) -> LLMProvider:
         from app.agent.providers.ollama import OllamaProvider
         return OllamaProvider()
     raise ValueError(
-        f"Unknown MODEL_PROVIDER '{name}'. Use 'groq', 'gemini' or 'ollama'.")
+        f"Unknown MODEL_PROVIDER '{name}'. Use 'gemini' or 'ollama'.")
 
 
 @lru_cache(maxsize=4)
